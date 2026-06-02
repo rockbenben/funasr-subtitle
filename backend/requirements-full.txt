@@ -1,0 +1,18 @@
+# 完整 funasr（torch）后端依赖 —— 仅 "full" 构建变体用。
+#
+# torch 需单独从 CUDA index 安装（不在此文件，避免装成 CPU 版）：
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+# 然后再装本文件：
+#   pip install -r requirements-full.txt
+#
+# 无 NVIDIA 卡时改用 CPU 版 torch（但相比 onnx CPU 包无提速，不推荐）：
+#   pip install torch torchaudio
+funasr
+fastapi
+uvicorn[standard]
+pydantic>=2
+python-multipart
+platformdirs
+soundfile
+numpy
+pyinstaller>=6.5

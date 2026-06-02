@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv-full/
+backend/app/_build.py
+*.egg-info/
+.pytest_cache/
+**/.pytest_cache/
+build/
+dist/
+*.spec.bak
+
+# PyInstaller output
+backend/build/
+backend/dist/
+backend/build-full/
+backend/dist-full/
+packaging/out/
+funasr-subtitle/
+*.zip
+
+# Node / frontend
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# Models & runtime data live in %LOCALAPPDATA%\funasr-subtitle\ (NOT in the repo).
+# 不要用裸 models//jobs/ 忽略：那会误伤源码包 backend/app/models 与 backend/app/jobs。
+*.onnx
+*.pt
+
+# Bundled binaries (large, staged by build / fetched in CI)
+packaging/bin/*.exe
+backend/frontend_dist/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.gstack/
+.claude/

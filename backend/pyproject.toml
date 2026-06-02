@@ -1,0 +1,38 @@
+[project]
+name = "funasr-subtitle"
+version = "0.1.0"
+description = "本地、离线、Windows 的 FunASR 字幕生成工具"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.6",
+    "python-multipart>=0.0.9",
+    "platformdirs>=4.2",
+    "numpy>=1.26",
+    "soundfile>=0.12",
+    "funasr-onnx",
+    # Windows: DirectML 版同时提供 CPU 与 DmlExecutionProvider（全显卡加速，§10/M8）
+    "onnxruntime-directml>=1.17",
+    "modelscope>=1.13",
+]
+
+[project.optional-dependencies]
+tray = ["pystray>=0.19", "pillow>=10"]
+dev = ["pytest>=8", "httpx>=0.27"]
+package = ["pyinstaller>=6.5"]
+
+[project.scripts]
+funasr-subtitle-cli = "app.engine.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+# 只收集 tests/，别去扫 PyInstaller 产物（dist/dist-full 里也有一堆 test_*.py）
+testpaths = ["tests"]
+norecursedirs = ["dist", "dist-full", "build", "build-full", ".venv", ".venv-full", "frontend_dist"]
