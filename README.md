@@ -23,19 +23,24 @@
 
 ---
 
+> **365 开源计划 #12** · 本地 · 离线的 Windows 音视频转字幕工具（基于 FunASR · CPU 即可、可选 CUDA）
+
 得益于 FunASR 的**非自回归** ASR 模型（不像 Whisper 那样逐 token 解码），纯 CPU 也能跑得很快，**最适合快速生成中 / 日 / 英字幕**。首次联网下载模型后**完全离线可用**，不上传任何音视频。输出的 `.srt` 可直接喂给独立项目 **subtitle-translator** 做翻译——本工具本身不做翻译。
 
 > 关键词：本地字幕生成 · 离线语音转文字 · 音视频转写 · speech-to-text · FunASR · SenseVoice · Paraformer · 中文 · 粤语 · 方言 · Windows · SRT 字幕
 
 ## 目录
 
-- [✨ 特性](#-特性)
-- [📦 下载](#-下载)
-- [🚀 使用](#-使用)
-- [⚙️ 工作原理](#️-工作原理)
-- [⚠️ 已知局限](#️-已知局限)
-- [🛠️ 开发](#️-开发)
-- [📄 License](#-license)
+- [funasr-subtitle](#funasr-subtitle)
+  - [目录](#目录)
+  - [✨ 特性](#-特性)
+  - [📦 下载](#-下载)
+  - [🚀 使用](#-使用)
+  - [⚙️ 工作原理](#️-工作原理)
+  - [⚠️ 已知局限](#️-已知局限)
+  - [🛠️ 开发](#️-开发)
+  - [📄 License](#-license)
+  - [关于 365 开源计划](#关于-365-开源计划)
 
 ## ✨ 特性
 
@@ -53,14 +58,19 @@
 
 前往 **[Releases](../../releases/latest)** 下载 Windows x64 便携包，解压 → 双击 `funasr-subtitle.exe` → 浏览器里用。两份功能 / 界面一致，只差推理后端：
 
-| 包 | 大小 | 后端 | 适用 |
-| --- | --- | --- | --- |
-| **funasr-subtitle-win-x64.zip** | ~340 MB | funasr-onnx · 纯 CPU | 绝大多数人首选（RTF ≈ 0.1，无需显卡） |
-| **funasr-subtitle-cuda-win-x64.zip** | ~2.6 GB | 完整 funasr · torch | 有 N 卡自动 GPU 加速、无卡回退 CPU；要说话人分离 / Paraformer 高精度 / 大模型 |
+| 包                                   | 大小    | 后端                 | 适用                                                                          |
+| ------------------------------------ | ------- | -------------------- | ----------------------------------------------------------------------------- |
+| **funasr-subtitle-win-x64.zip**      | ~340 MB | funasr-onnx · 纯 CPU | 绝大多数人首选（RTF ≈ 0.1，无需显卡）                                         |
+| **funasr-subtitle-cuda-win-x64.zip** | ~2.6 GB | 完整 funasr · torch  | 有 N 卡自动 GPU 加速、无卡回退 CPU；要说话人分离 / Paraformer 高精度 / 大模型 |
 
 > [!NOTE]
 > 首次运行需联网下载模型（CPU 包默认 SenseVoice ≈ 235 MB），之后离线可用。
 > 程序未签名，SmartScreen 提示时点「更多信息」→「仍要运行」。
+
+> [!IMPORTANT]
+> CUDA 包超过 GitHub 单文件 2 GB 上限，拆成两个分卷上传。下载 `…cuda-win-x64.zip.001`
+> 和 `.002` 放同一目录，双击随附的 `merge-cuda-parts.bat`（或运行
+> `copy /b "…zip.001"+"…zip.002" "…zip"`）合并出完整 zip，再解压。CPU 包无需此步。
 
 > [!TIP]
 > 纯 CPU 用户首选上面的 onnx 包（小、快）。完整版主要是为 GPU 加速、说话人分离、
@@ -123,18 +133,18 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Variant full
 
 **可调环境变量**（均可选，留空用默认；进阶用户按需自调）：
 
-| 变量 | 默认 | 作用 |
-| --- | --- | --- |
-| `FUNASR_SUBTITLE_BACKEND` | 烘焙值 | 推理后端 `onnx` / `full` |
-| `FUNASR_SUBTITLE_FORCE_CPU` | 0 | 设 `1` 强制完整版用 CPU（有卡也不用，排障 / 对比） |
-| `FUNASR_SUBTITLE_PORT` | 8765 | 服务端口（被占用则自增扫描） |
-| `FUNASR_SUBTITLE_MAX_CHARS` | 30 | 每行最大显示宽度默认值（0=不限制） |
-| `FUNASR_SUBTITLE_MAX_CUE_MS` | 7000 | 单条字幕最长时长（毫秒） |
-| `FUNASR_SUBTITLE_MAX_UPLOAD_MB` | 0 | 上传大小上限（MB，0=不限） |
-| `FUNASR_SUBTITLE_STALL_TIMEOUT` | 90 | 解码卡死判定秒数 |
-| `FUNASR_SUBTITLE_NUM_THREADS` | 4 | onnxruntime 线程数 |
-| `FUNASR_SUBTITLE_PUNC_CHUNK` | 110 | ct-punc 长文本分块长度 |
-| `FUNASR_SUBTITLE_DATA_DIR` | `%LOCALAPPDATA%\funasr-subtitle` | 模型 / 任务数据目录 |
+| 变量                            | 默认                             | 作用                                               |
+| ------------------------------- | -------------------------------- | -------------------------------------------------- |
+| `FUNASR_SUBTITLE_BACKEND`       | 烘焙值                           | 推理后端 `onnx` / `full`                           |
+| `FUNASR_SUBTITLE_FORCE_CPU`     | 0                                | 设 `1` 强制完整版用 CPU（有卡也不用，排障 / 对比） |
+| `FUNASR_SUBTITLE_PORT`          | 8765                             | 服务端口（被占用则自增扫描）                       |
+| `FUNASR_SUBTITLE_MAX_CHARS`     | 30                               | 每行最大显示宽度默认值（0=不限制）                 |
+| `FUNASR_SUBTITLE_MAX_CUE_MS`    | 7000                             | 单条字幕最长时长（毫秒）                           |
+| `FUNASR_SUBTITLE_MAX_UPLOAD_MB` | 0                                | 上传大小上限（MB，0=不限）                         |
+| `FUNASR_SUBTITLE_STALL_TIMEOUT` | 90                               | 解码卡死判定秒数                                   |
+| `FUNASR_SUBTITLE_NUM_THREADS`   | 4                                | onnxruntime 线程数                                 |
+| `FUNASR_SUBTITLE_PUNC_CHUNK`    | 110                              | ct-punc 长文本分块长度                             |
+| `FUNASR_SUBTITLE_DATA_DIR`      | `%LOCALAPPDATA%\funasr-subtitle` | 模型 / 任务数据目录                                |
 
 ## 📄 License
 
@@ -142,8 +152,14 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Variant full
 
 第三方组件各自的许可如下，分发前请逐项确认：
 
-| 组件 | 许可 |
-| --- | --- |
-| [FunASR](https://github.com/modelscope/FunASR) / funasr-onnx | MIT（© 2025 FunASR） |
-| 预训练模型（SenseVoice / Paraformer / FSMN-VAD / CT-Punc） | 各自 **Model License**，见对应 [ModelScope](https://modelscope.cn) 模型页 |
-| 捆绑的 `ffmpeg.exe` | 取决于其构建版本（GPL / LGPL），见所用 ffmpeg 构建的 License |
+| 组件                                                         | 许可                                                                      |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| [FunASR](https://github.com/modelscope/FunASR) / funasr-onnx | MIT（© 2025 FunASR）                                                      |
+| 预训练模型（SenseVoice / Paraformer / FSMN-VAD / CT-Punc）   | 各自 **Model License**，见对应 [ModelScope](https://modelscope.cn) 模型页 |
+| 捆绑的 `ffmpeg.exe`                                          | 取决于其构建版本（GPL / LGPL），见所用 ffmpeg 构建的 License              |
+
+## 关于 365 开源计划
+
+本项目是 [365 开源计划](https://github.com/rockbenben/365opensource) 的第 **12** 个项目。
+
+一个人 + AI，一年 300+ 个开源项目。[提交你的需求 →](https://my.feishu.cn/share/base/form/shrcnI6y7rrmlSjbzkYXh6sjmzb)
