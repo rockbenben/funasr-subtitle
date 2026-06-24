@@ -1,6 +1,6 @@
 [project]
 name = "funasr-subtitle"
-version = "0.1.0"
+version = "0.1.1"
 description = "本地、离线、Windows 的 FunASR 字幕生成工具"
 requires-python = ">=3.11,<3.12"
 dependencies = [

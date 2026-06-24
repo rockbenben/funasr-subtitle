@@ -5,7 +5,11 @@
 - collect_all('funasr_onnx') 在无 torch 时**无法 import 而枚举失败**。
   解决：在 spec 里先收集 modelscope（无 stub），再注入 torch-stub，再收集 funasr_onnx /
   scipy / sklearn —— 与运行时的安全顺序一致。
-- 额外加运行时钩子 rthook_torch_stub.py，保证冻结程序启动最早期就有 torch-stub。
+- **不要**用 runtime hook 在启动期注入 torch-stub：modelscope 的 get_logger() 用
+  find_spec('torch') 探测 torch，一旦发现（哪怕 stub）就 import torch_utils，其顶部
+  `import torch.multiprocessing` 撞上扁平的 stub 直接崩
+  （"No module named 'torch.multiprocessing'; 'torch' is not a package"）。stub 必须在
+  modelscope 完成 torch-free 初始化之后再装 —— 由运行时 _ensure_funasr 负责，spec 无 rthook。
 - 显式列出 funasr_onnx 子模块作为 hiddenimports，双保险。
 - excludes torch / funasr（运行时用 numpy + torch-stub）。模型不进包，首启下载。
 """
@@ -77,7 +81,9 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
-    runtime_hooks=["packaging_hooks/rthook_torch_stub.py"],
+    # 无 runtime hook：torch-stub 必须在 modelscope 初始化「之后」由 _ensure_funasr 安装，
+    # 启动期注入会让 modelscope 撞 torch.multiprocessing 崩（见上方 docstring §17.7）。
+    runtime_hooks=[],
     excludes=["torch", "funasr", "tkinter", "matplotlib", "tensorflow"],
     noarchive=False,
 )
