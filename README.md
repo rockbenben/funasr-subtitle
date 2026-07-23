@@ -4,16 +4,17 @@
 
 **纯本地 · 离线 · 极快 · 纯 CPU 即可运行的 Windows 音视频转写 / 字幕生成工具**
 
+Windows 音视频转字幕，纯本地离线、CPU 即可跑，中文粤语强于 Whisper
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![365 开源计划 #012](https://img.shields.io/badge/365%20%E5%BC%80%E6%BA%90%E8%AE%A1%E5%88%92-%23012-1f6feb)](https://github.com/rockbenben/365opensource)
+
+**[⬇ 下载最新版](https://github.com/rockbenben/funasr-subtitle/releases/latest)** —— Windows x64 便携包，解压双击即用
+
 把音频或视频（mp4 / mkv / mp3 / m4a / wav …）丢进去，得到带时间戳的多语言字幕（SRT / VTT / TXT / JSON）。
 基于 [FunASR](https://github.com/modelscope/FunASR) 的 ONNX 推理；FunASR 模型针对中文场景训练，**中文 / 粤语**表现通常优于通用的 Whisper。
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6?logo=windows&logoColor=white)
-![Python](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)
-![Runtime](https://img.shields.io/badge/runtime-CPU%20only-success)
-![Offline](https://img.shields.io/badge/offline-ready-success)
-
-[下载](#-下载) · [使用](#-使用) · [工作原理](#-工作原理) · [开发](#-开发)
+[下载](#-下载) · [使用](#-使用) · [工作原理](#️-工作原理) · [开发](#️-开发)
 
 <br>
 
@@ -23,9 +24,7 @@
 
 ---
 
-> **365 开源计划 #12** · 本地 · 离线的 Windows 音视频转字幕工具（基于 FunASR · CPU 即可、可选 CUDA）
-
-得益于 FunASR 的**非自回归** ASR 模型（不像 Whisper 那样逐 token 解码），纯 CPU 也能跑得很快，**最适合快速生成中 / 日 / 英字幕**。首次联网下载模型后**完全离线可用**，不上传任何音视频。输出的 `.srt` 可直接喂给独立项目 **subtitle-translator** 做翻译——本工具本身不做翻译。
+得益于 FunASR 的**非自回归** ASR 模型（不像 Whisper 那样逐 token 解码），纯 CPU 也能跑得很快，**最适合快速生成中 / 日 / 英字幕**。首次联网下载模型后**完全离线可用**，不上传任何音视频。输出的 `.srt` 可直接喂给 **[subtitle-translator](https://tools.newzone.top/zh/subtitle-translator)** 做翻译——本工具本身不做翻译。
 
 > 关键词：本地字幕生成 · 离线语音转文字 · 音视频转写 · speech-to-text · FunASR · SenseVoice · Paraformer · 中文 · 粤语 · 方言 · Windows · SRT 字幕
 
@@ -58,17 +57,18 @@
 
 前往 **[Releases](../../releases/latest)** 下载 Windows x64 便携包，解压 → 双击 `funasr-subtitle.exe` → 浏览器里用。两份功能 / 界面一致，只差推理后端：
 
-| 包                                   | 大小    | 后端                 | 适用                                                                          |
-| ------------------------------------ | ------- | -------------------- | ----------------------------------------------------------------------------- |
-| **funasr-subtitle-win-x64.zip**      | ~340 MB | funasr-onnx · 纯 CPU | 绝大多数人首选（RTF ≈ 0.1，无需显卡）                                         |
-| **funasr-subtitle-cuda-win-x64.zip** | ~2.6 GB | 完整 funasr · torch  | 有 N 卡自动 GPU 加速、无卡回退 CPU；要说话人分离 / Paraformer 高精度 / 大模型 |
+| 包                                   | 大小    | 后端                 | 适用                                                                          | 在哪个 release                                                              |
+| ------------------------------------ | ------- | -------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| **funasr-subtitle-win-x64.zip**      | ~340 MB | funasr-onnx · 纯 CPU | 绝大多数人首选（RTF ≈ 0.1，无需显卡）                                         | [最新版](https://github.com/rockbenben/funasr-subtitle/releases/latest)     |
+| **funasr-subtitle-cuda-win-x64.zip** | ~2.6 GB | 完整 funasr · torch  | 有 N 卡自动 GPU 加速、无卡回退 CPU；要说话人分离 / Paraformer 高精度 / 大模型 | [v0.1.0](https://github.com/rockbenben/funasr-subtitle/releases/tag/v0.1.0) |
 
 > [!NOTE]
 > 首次运行需联网下载模型（CPU 包默认 SenseVoice ≈ 235 MB），之后离线可用。
 > 程序未签名，SmartScreen 提示时点「更多信息」→「仍要运行」。
 
 > [!IMPORTANT]
-> CUDA 包超过 GitHub 单文件 2 GB 上限，拆成两个分卷上传。下载 `…cuda-win-x64.zip.001`
+> **CUDA 包目前只在 [v0.1.0](https://github.com/rockbenben/funasr-subtitle/releases/tag/v0.1.0) 里**，最新版只发了 CPU 包，别在 latest 页面上找。
+> 它超过 GitHub 单文件 2 GB 上限，拆成了两个分卷。下载 `…cuda-win-x64.zip.001`
 > 和 `.002` 放同一目录，双击随附的 `merge-cuda-parts.bat`（或运行
 > `copy /b "…zip.001"+"…zip.002" "…zip"`）合并出完整 zip，再解压。CPU 包无需此步。
 
@@ -82,7 +82,7 @@
 1. 双击 `funasr-subtitle.exe`，浏览器自动打开。
 2. 首次按页面提示下载默认模型（之后离线）。
 3. 拖入音频 / 视频 → 选语言 / 模型（可填热词、调每行最大字数、选标点模式）→ 点「开始转写」。
-4. 导出 SRT / VTT / TXT / JSON 或「复制全文」；`.srt` 可直接导入 subtitle-translator 翻译。
+4. 导出 SRT / VTT / TXT / JSON 或「复制全文」；`.srt` 可直接导入 [subtitle-translator](https://tools.newzone.top/zh/subtitle-translator) 翻译。
 5. 退出：页面右上角「退出」或右下角托盘图标。
 
 ## ⚙️ 工作原理
@@ -160,6 +160,4 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Variant full
 
 ## 关于 365 开源计划
 
-本项目是 [365 开源计划](https://github.com/rockbenben/365opensource) 的第 **12** 个项目。
-
-一个人 + AI，一年 300+ 个开源项目。[提交你的需求 →](https://my.feishu.cn/share/base/form/shrcnI6y7rrmlSjbzkYXh6sjmzb)
+[365 开源计划](https://github.com/rockbenben/365opensource) 的第 **#012** 个项目——一个人 + AI，一年 300+ 个开源项目。[提交你的需求 →](https://365.aishort.top/) · [Discord](https://discord.gg/PZTQfJ4GjX) · [Telegram](https://t.me/aishort_top)
