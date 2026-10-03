@@ -27,7 +27,11 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 class DecodeError(RuntimeError):
-    """解码/格式相关错误；message 为面向用户的中文说明。"""
+    """解码/格式相关错误；message 为面向用户的中文说明，detail 放原始技术输出（界面折叠显示）。"""
+
+    def __init__(self, message: str, detail: "Optional[str]" = None) -> None:
+        super().__init__(message)
+        self.detail = detail
 
 
 class DecodeCancelled(DecodeError):
@@ -51,7 +55,7 @@ def probe_media(path: str | Path) -> dict:
     """
     src = Path(path)
     if not src.exists():
-        raise DecodeError(f"找不到输入文件：{src.name}")
+        raise DecodeError("找不到这个文件，可能已经被删掉了。重新拖一次试试。", detail=str(src))
     if src.stat().st_size == 0:
         raise DecodeError("文件是空的（0 字节）")
 
@@ -77,7 +81,8 @@ def probe_media(path: str | Path) -> dict:
         detail = (out.stderr or "").strip().splitlines()
         tail = detail[-1] if detail else ""
         raise DecodeError(
-            f"无法识别的文件格式：这可能不是音频/视频文件，或文件已损坏。{('（' + tail + '）') if tail else ''}"
+            "读不出来：这个文件可能不是音视频，或者已经损坏。",
+            detail=tail or None,
         )
 
     try:
@@ -232,8 +237,10 @@ def decode_to_16k_mono(
         if killed["stall"]:
             raise DecodeError("解码卡住已超时中断：文件可能损坏或编码异常")
         msg = " ".join(err_lines).strip()
-        raise DecodeError(f"解码失败（ffmpeg code {code}）：{msg[:400]}" if msg
-                          else f"解码失败（ffmpeg code {code}）")
+        raise DecodeError(
+            "解码失败，可以点「查看详情」看后台输出。",
+            detail=f"ffmpeg code {code}" + (f": {msg[:400]}" if msg else ""),
+        )
 
     raw = b"".join(chunks)
     # f32le：每样本 4 字节。被杀/截断时尾部可能残留不足 4 字节，截到 4 的整数倍，

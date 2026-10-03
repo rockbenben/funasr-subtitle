@@ -56,6 +56,8 @@ class JobOptions(BaseModel):
 class JobError(BaseModel):
     code: str
     message: str
+    # 原始技术细节（ffmpeg / 异常）：界面折叠进「查看详情」，message 只放人话。
+    detail: Optional[str] = None
 
 
 class Job(BaseModel):

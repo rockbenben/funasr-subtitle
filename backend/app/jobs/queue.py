@@ -131,10 +131,10 @@ class JobManager:
             except DecodeCancelled:  # 解码被取消（子类，必须在 DecodeError 之前捕获）
                 self._cancelled(job)
             except DecodeError as e:  # 格式不支持/无音轨/解码失败 -> 面向用户的清晰错误
-                self._fail(job, "decode_error", str(e))
+                self._fail(job, "decode_error", str(e), detail=getattr(e, "detail", None))
             except Exception as e:  # noqa: BLE001
                 traceback.print_exc()
-                self._fail(job, "internal_error", str(e))
+                self._fail(job, "internal_error", "后台出错了，请重试；还不行就重启程序。", detail=str(e))
             finally:
                 # 终态后删掉该任务的上传文件，避免长会话下 %LOCALAPPDATA% 无限增长
                 self._cleanup_input(job_id)
@@ -153,7 +153,7 @@ class JobManager:
         cancel = self._cancels.get(job.id) or threading.Event()
         input_path = self._inputs.get(job.id)
         if not input_path or not Path(input_path).exists():
-            self._fail(job, "input_missing", "input file not found")
+            self._fail(job, "input_missing", "找不到刚上传的文件，请重新拖一次。")
             return
 
         # 1) 解码
@@ -207,15 +207,18 @@ class JobManager:
         self.broker.publish(f"job:{job.id}",
                             {"type": "progress", "stage": stage, "percent": round(percent, 1)})
 
-    def _fail(self, job: Job, code: str, message: str) -> None:
+    def _fail(self, job: Job, code: str, message: str, detail: Optional[str] = None) -> None:
         job.status = JobStatus.error
-        job.error = JobError(code=code, message=message)
-        self.broker.publish(f"job:{job.id}", {"type": "error", "code": code, "message": message})
+        job.error = JobError(code=code, message=message, detail=detail)
+        self.broker.publish(f"job:{job.id}", {
+            "type": "error", "code": code, "message": message, "detail": detail,
+        })
 
     def _cancelled(self, job: Job) -> None:
+        # 用户主动停止不是失败：code=cancelled 让界面按「已取消」收口。
         job.status = JobStatus.error
-        job.error = JobError(code="cancelled", message="job cancelled")
-        self.broker.publish(f"job:{job.id}", {"type": "error", "code": "cancelled", "message": "job cancelled"})
+        job.error = JobError(code="cancelled", message="已取消转写")
+        self.broker.publish(f"job:{job.id}", {"type": "error", "code": "cancelled", "message": "已取消转写"})
 
     def _cleanup_input(self, job_id: str) -> None:
         """终态清理：删上传目录 + 丢弃 cancel 事件（避免长会话下 _cancels 无限增长）。

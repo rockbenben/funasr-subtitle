@@ -73,16 +73,20 @@ def create_app() -> FastAPI:
 
     app.state.request_shutdown = request_shutdown
 
-    # 统一错误响应 {error:{code,message}}（§7）
+    # 统一错误响应 {error:{code,message[,detail]}}（§7）：message 给人看，detail 放原文。
     @app.exception_handler(RequestValidationError)
     async def _validation(_req: Request, exc: RequestValidationError):
         return JSONResponse(status_code=422,
-                            content={"error": {"code": "validation_error", "message": str(exc.errors())}})
+                            content={"error": {"code": "validation_error",
+                                               "message": "请求内容不完整，请重试。",
+                                               "detail": str(exc.errors())}})
 
     @app.exception_handler(Exception)
     async def _unhandled(_req: Request, exc: Exception):
         return JSONResponse(status_code=500,
-                            content={"error": {"code": "internal_error", "message": str(exc)}})
+                            content={"error": {"code": "internal_error",
+                                               "message": "后台出错了，请重试；还不行就重启程序。",
+                                               "detail": str(exc)}})
 
     # 路由
     app.include_router(router)
