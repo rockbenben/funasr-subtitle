@@ -41,3 +41,7 @@ backend/frontend_dist/
 Thumbs.db
 .gstack/
 .claude/
+.qoder-credits/
+
+# UI 走查工作稿（design preview：夹具后端 + 截图 + 打磨稿，不入库）
+frontend/design-preview/
