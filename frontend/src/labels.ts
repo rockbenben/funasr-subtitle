@@ -11,11 +11,12 @@ export const LANGUAGE_OPTIONS: { value: Language; label: string }[] = [
   { value: "ko", label: "韩语" },
 ];
 
+// 阶段名给人看，不写流水线内部词（解码/组装）。
 export const STAGE_LABELS: Record<Stage, string> = {
-  decoding: "解码",
-  vad: "语音切分",
-  asr: "识别",
-  punc: "标点",
-  diar: "说话人",
-  assembling: "组装",
+  decoding: "读音频",
+  vad: "找语音",
+  asr: "转文字",
+  punc: "加标点",
+  diar: "分说话人",
+  assembling: "写字幕",
 };

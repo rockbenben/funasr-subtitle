@@ -15,30 +15,36 @@ import type {
 export interface ApiError {
   code: string;
   message: string;
+  /** 原始技术细节（ffmpeg / Python 异常等）：界面折叠进「查看详情」，不当主干。 */
+  detail?: string;
 }
 
 export class SubtitleApiError extends Error {
   code: string;
+  detail?: string;
   constructor(err: ApiError) {
     super(err.message);
     this.name = "SubtitleApiError";
     this.code = err.code;
+    this.detail = err.detail;
   }
 }
 
 async function parseError(res: Response): Promise<never> {
   let code = `http_${res.status}`;
   let message = res.statusText || "请求失败";
+  let detail: string | undefined;
   try {
     const body = await res.json();
     if (body && body.error) {
       code = body.error.code ?? code;
       message = body.error.message ?? message;
+      detail = body.error.detail;
     }
   } catch {
     // body was not JSON; keep defaults
   }
-  throw new SubtitleApiError({ code, message });
+  throw new SubtitleApiError({ code, message, detail });
 }
 
 async function getJson<T>(url: string): Promise<T> {
@@ -149,11 +155,12 @@ function openTypedSocket<E>(path: string, cb: WsCallbacks<E>): WsHandle {
       const data = JSON.parse(msg.data) as E;
       cb.onEvent(data);
     } catch {
-      cb.onError?.(new Error("收到无法解析的 WebSocket 消息"));
+      // 面向用户的措辞由调用方决定，这里只报「发生了什么」，不留第二套文案。
+      cb.onError?.(new Error("ws_parse"));
     }
   };
   ws.onerror = () => {
-    if (!closedByUs) cb.onError?.(new Error("WebSocket 连接错误"));
+    if (!closedByUs) cb.onError?.(new Error("ws_error"));
   };
   ws.onclose = () => {
     if (!closedByUs) cb.onClose?.();

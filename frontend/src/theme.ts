@@ -34,6 +34,14 @@ export const studioTheme: ThemeConfig = {
     colorBorderSecondary: "#2A251E",
     colorText: STUDIO.text,
     colorTextSecondary: STUDIO.textDim,
+    // Typography 的 type="secondary" 走 colorTextDescription（= colorTextTertiary），
+    // 只写 colorTextSecondary 会漏：屏上仍是 antd 派生的冷白 45%（对比 4.44:1）。
+    colorTextTertiary: STUDIO.textDim,
+    colorTextDescription: STUDIO.textDim,
+    colorTextPlaceholder: "#948976",
+    // 键盘焦点环：默认 controlOutline 是主色 24%，在暖炭底上只有 1.7:1。
+    controlOutline: "rgba(232, 163, 61, 0.55)",
+    controlOutlineWidth: 2,
     fontFamily: CJK_SANS,
     fontFamilyCode: MONO,
     borderRadius: 10,
@@ -43,7 +51,13 @@ export const studioTheme: ThemeConfig = {
     boxShadow: "0 8px 28px -10px rgba(0,0,0,.7)",
   },
   components: {
-    Button: { fontWeight: 600, primaryShadow: "none", defaultShadow: "none" },
+    // solid 主键的白字压在琥珀上只有 2.86:1；深色前景与 Segmented 选中项同一套语言。
+    Button: {
+      fontWeight: 600,
+      primaryShadow: "none",
+      defaultShadow: "none",
+      primaryColor: "#1A1610",
+    },
     Card: { paddingLG: 22 },
     Segmented: {
       itemSelectedBg: STUDIO.amber,
@@ -51,8 +65,9 @@ export const studioTheme: ThemeConfig = {
       trackBg: "#181410",
     },
     Progress: { defaultColor: STUDIO.amber },
-    Upload: { colorBorder: STUDIO.border },
-    Steps: { colorPrimary: STUDIO.amber },
+    // 拖放区边框走 token，别用内联 style：内联 borderColor 会压过 antd 的 :hover 规则。
+    Upload: { colorBorder: STUDIO.border, colorPrimaryHover: STUDIO.amber },
+    Steps: { colorPrimary: STUDIO.amber, colorTextLightSolid: "#1A1610" },
     Select: { optionSelectedBg: "rgba(232,163,61,.16)" },
     Input: { activeShadow: "0 0 0 2px rgba(232,163,61,.18)" },
   },

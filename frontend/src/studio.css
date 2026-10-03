@@ -4,6 +4,7 @@
   --amber-soft: #f0be6e;
   --text-dim: #a89c86;
   --border: #3a342b;
+  --rec: #e5544b;
   --mono: "Space Mono", "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
@@ -46,6 +47,7 @@ body::after {
 
 /* ---- 字体工具类 ---- */
 .mono { font-family: var(--mono); font-feature-settings: "tnum"; }
+.nowrap { white-space: nowrap; }
 .ts { font-family: var(--mono); color: var(--amber-soft); letter-spacing: -0.02em; }
 .label-cap {
   font-family: var(--mono);
@@ -54,6 +56,52 @@ body::after {
   text-transform: uppercase;
   color: var(--text-dim);
 }
+/* 拉丁小标靠字距撑开；中文被同样的字距拆成散字，所以中文段单独收到 .06em。 */
+.label-cap .cap-cn { letter-spacing: 0.06em; text-transform: none; }
+
+/* ---- 破坏性文字钮：antd 的 text 变体会把 #E5544B 派生成暗红（3.5:1），这里钉回主题红。
+       页眉那一带压在暖光晕上（实测底 rgb(39,33,24)），所以用比 --rec 更亮一档的红才过 4.5。---- */
+.btn-exit { color: #EE6B62 !important; }
+.btn-exit:hover { color: #F58379 !important; background: rgba(229, 84, 75, 0.10) !important; }
+
+/* filled 主色钮：默认前景是派生的暗琥珀压在暗琥珀底上只有 3.5:1，提亮到 amberSoft。 */
+.ant-btn-color-primary.ant-btn-variant-filled { color: var(--amber-soft); border-color: #6B5326; }
+.ant-btn-color-primary.ant-btn-variant-filled:hover { color: #FFD98F; background: rgba(232, 163, 61, 0.16); }
+
+/* 禁用态：读得出「按钮在这儿，但还没就绪」，而不是像坏掉（默认白字 25% 只有 2.2:1）。 */
+.ant-btn-color-primary.ant-btn-variant-solid:disabled,
+.ant-btn-color-primary.ant-btn-variant-solid.ant-btn-disabled {
+  color: var(--text-dim) !important;
+  background: rgba(232, 163, 61, 0.14) !important;
+  border-color: #5A4A2A !important;
+}
+.ant-btn-color-primary.ant-btn-variant-solid:disabled .anticon,
+.ant-btn-color-primary.ant-btn-variant-solid.ant-btn-disabled .anticon { color: var(--text-dim) !important; }
+
+/* 键盘焦点环：antd 的 controlOutline 是 alias（由 colorPrimaryBg 混出来，用户 token 改不动），
+   在暖炭底上只有 1.7:1。这里显式给一圈琥珀实线，和输入框的聚焦语言一致。 */
+.ant-btn:focus-visible,
+.ant-segmented:focus-visible,
+.ant-upload-btn:focus-visible,
+.ant-switch:focus-visible,
+.ant-select:focus-visible .ant-select-selector {
+  outline: 2px solid var(--amber) !important;
+  outline-offset: 2px !important;
+}
+
+/* 正文里的链接别用派生暗琥珀（压在卡底上读不清），提亮到 amberSoft。 */
+.ant-typography a { color: var(--amber-soft); }
+.ant-typography a:hover { color: #FFD98F; }
+
+/* 禁用输入框的占位符：字段本身灰着，但格式说明还得读得清。 */
+.ant-input:disabled::placeholder,
+.ant-input[disabled]::placeholder { color: var(--text-dim); }
+
+/* 进行中别把整颗主键压暗：变暗后它与「禁用」几乎同形，唯一说明在干活的文字反而更不显。 */
+.ant-btn.ant-btn-loading { opacity: 1; }
+
+/* 开关视觉尺寸不动，命中区补到 38px 高（小开关 44×22 不好点）。 */
+.switch-hit { display: inline-flex; padding: 8px 6px; margin: -8px -6px; }
 
 /* ---- 品牌字牌 + REC 圆点 ---- */
 .wordmark {
@@ -103,6 +151,32 @@ body::after {
 }
 .seg-row:hover { background: rgba(232, 163, 61, 0.04); }
 .seg-text { line-height: 1.7; }
+
+/* ---- 拖放区：hover / 拖入都要看得出（内联 borderColor 会吃掉 antd 的 :hover，所以边框交给这里）---- */
+.ant-upload.ant-upload-drag.drop-zone { border-color: var(--border); transition: border-color .18s, background .18s; }
+.ant-upload.ant-upload-drag.drop-zone:hover { border-color: var(--amber); background: rgba(232, 163, 61, 0.05); }
+.ant-upload.ant-upload-drag.drop-zone.ant-upload-drag-hover {
+  border-color: var(--amber); border-style: solid; background: rgba(232, 163, 61, 0.12);
+}
+.ant-upload.ant-upload-drag.drop-zone.ant-upload-drag-hover .label-hint { color: var(--amber-soft); }
+
+/* ---- 结果列表内滚：底部渐隐，提示「下面还有」---- */
+.scroll-fade {
+  mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 34px), transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 34px), transparent 100%);
+}
+
+/* ---- 窄屏：时间码列让位给正文；语言分段内部横滚 ---- */
+@media (max-width: 520px) {
+  .seg-row { grid-template-columns: 104px 1fr; gap: 10px; }
+  .seg-scroll {
+    max-width: 100%; min-width: 0;
+    overflow-x: auto; scrollbar-width: none;
+    mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 28px), transparent 100%);
+    -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 28px), transparent 100%);
+  }
+  .seg-scroll::-webkit-scrollbar { display: none; }
+}
 
 /* ---- 滚动条 ---- */
 *::-webkit-scrollbar { width: 10px; height: 10px; }

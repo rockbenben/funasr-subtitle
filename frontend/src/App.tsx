@@ -21,6 +21,7 @@ import {
 } from "antd";
 import {
   AudioOutlined,
+  DownloadOutlined,
   PoweroffOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
@@ -49,6 +50,7 @@ import { STUDIO } from "./theme";
 
 const { Text } = Typography;
 const EXPORT_FORMATS: ExportFormat[] = ["srt", "vtt", "txt", "json"];
+const TRANSLATOR_URL = "https://tools.newzone.top/zh/subtitle-translator";
 // 接受范围尽量大：MIME 通配 + 一长串显式扩展名（很多容器浏览器不会自动归类成 audio/video，
 // 如 .ts/.mka/.opus/.amr）。后端用 ffmpeg/ffprobe 探测，只要有音轨就能转。
 const ACCEPT_MEDIA = [
@@ -73,16 +75,33 @@ function formatTimestamp(ms: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)}.${pad(ms3, 3)}`;
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <div className="label-cap" style={{ marginBottom: 10 }}>{children}</div>;
+// 卡标题统一「大写拉丁 · 中文」：拉丁靠字距撑开，中文段单独收字距，否则被拆成散字。
+function SectionLabel({ en, children }: { en: string; children?: React.ReactNode }) {
+  return (
+    <div className="label-cap" style={{ marginBottom: 10 }}>
+      {en}
+      {children ? <> · <span className="cap-cn">{children}</span></> : null}
+    </div>
+  );
 }
 
-// ----- 模型下载面板 -----
+function FieldLabel({ children, hint }: { children: React.ReactNode; hint?: React.ReactNode }) {
+  return (
+    <Flex vertical gap={2}>
+      <Text type="secondary" style={{ fontSize: 12 }}>{children}</Text>
+      {hint ? <Text type="secondary" style={{ fontSize: 11.5, opacity: 0.85 }}>{hint}</Text> : null}
+    </Flex>
+  );
+}
+
+// ----- 模型下载面板（首启，以及「选了还没下载的模型」时复用）-----
 function ModelDownloadPanel({
   model,
+  caption = "先下模型",
   onDownloaded,
 }: {
   model: ModelInfo;
+  caption?: string;
   onDownloaded: () => void;
 }) {
   const { message } = AntApp.useApp();
@@ -110,19 +129,19 @@ function ModelDownloadPanel({
           message.success("模型已就绪");
           onDownloaded();
         } else if (ev.type === "error") {
-          message.error(ev.message || "下载失败");
+          message.error("下载失败，点重试");
           setDownloading(false);
         }
       },
       onError: () => {
-        message.error("下载连接中断");
+        message.error("连不上后台了，下载中断");
         setDownloading(false);
       },
     });
     try {
       await downloadModel(model.id);
     } catch (e) {
-      message.error(e instanceof SubtitleApiError ? e.message : "下载请求失败");
+      message.error(e instanceof SubtitleApiError ? e.message : "下载没发出去，重试一下");
       setDownloading(false);
       wsRef.current?.close();
       wsRef.current = null;
@@ -131,14 +150,14 @@ function ModelDownloadPanel({
 
   return (
     <Card className="rise d1" variant="outlined" styles={{ body: { padding: 22 } }}>
-      <SectionLabel>FIRST RUN · 首启下载</SectionLabel>
+      <SectionLabel en="FIRST RUN">{caption}</SectionLabel>
       <Flex justify="space-between" align="center" gap={16} wrap>
         <Text type="secondary">
-          需下载默认模型 <Text strong style={{ color: STUDIO.text }}>{model.name}</Text>
-          （约 {model.size_mb.toFixed(0)} MB），之后完全离线可用。
+          第一次要用，需要先下模型 <Text strong style={{ color: STUDIO.text }}>{model.name}</Text>
+          （约 {model.size_mb.toFixed(0)} MB）。下完就彻底离线，不再联网。
         </Text>
         <Button color="primary" variant="solid" loading={downloading} onClick={start}>
-          {downloading ? "下载中…" : "下载模型"}
+          {downloading ? "正在下载…" : "下载模型"}
         </Button>
       </Flex>
       {(downloading || percent > 0) && (
@@ -154,37 +173,54 @@ function ModelDownloadPanel({
 // ----- 结果面板 -----
 function ResultsPanel({ job }: { job: Job }) {
   const { message } = AntApp.useApp();
+  const [copied, setCopied] = useState(false);
   const fullText = useMemo(() => job.segments.map((s) => s.text).join("\n"), [job.segments]);
   const copyAll = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(fullText);
-      message.success("已复制全文");
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+      message.success(`已复制 ${job.segments.length} 句`);
     } catch {
-      message.error("复制失败");
+      message.error("复制没成功，再试一次");
     }
-  }, [fullText, message]);
+  }, [fullText, job.segments.length, message]);
 
   return (
     <Card className="rise" variant="outlined">
       <Flex justify="space-between" align="center" wrap gap={12} style={{ marginBottom: 14 }}>
-        <SectionLabel>TRANSCRIPT · {job.segments.length} 段</SectionLabel>
+        <SectionLabel en="TRANSCRIPT">字幕 · {job.segments.length} 句</SectionLabel>
         <Space wrap>
           {EXPORT_FORMATS.map((fmt) => (
-            <Button key={fmt} size="small" variant="outlined" href={exportUrl(job.id, fmt)} download>
+            <Button
+              key={fmt}
+              size="small"
+              variant="outlined"
+              icon={<DownloadOutlined />}
+              href={exportUrl(job.id, fmt)}
+              download
+              onClick={() => message.info(`已开始下载 .${fmt}`)}
+            >
               .{fmt}
             </Button>
           ))}
           <Button size="small" color="primary" variant="filled" onClick={copyAll}>
-            复制全文
+            {copied ? "已复制 ✓" : "复制全文"}
           </Button>
         </Space>
       </Flex>
       <Text type="secondary" style={{ fontSize: 12 }}>
-        .srt 可直接导入 subtitle-translator 翻译
+        想翻成双语字幕？把 .srt 导入{" "}
+        <a href={TRANSLATOR_URL} target="_blank" rel="noreferrer">字幕翻译器</a>
       </Text>
-      <div style={{ marginTop: 12, maxHeight: 420, overflow: "auto", paddingRight: 6 }}>
+      <div
+        className="scroll-fade"
+        style={{ marginTop: 12, maxHeight: 420, overflow: "auto", paddingRight: 6 }}
+      >
         {job.segments.length === 0 ? (
-          <Text type="secondary">（无文本片段）</Text>
+          <Text type="secondary">
+            没听到人声。可能是纯音乐、静音，或者这个文件没有音轨。换个文件再试。
+          </Text>
         ) : (
           job.segments.map((seg: Segment, i) => (
             <div className="seg-row" key={i}>
@@ -228,6 +264,10 @@ export default function App() {
   const [percent, setPercent] = useState(0);
   const [running, setRunning] = useState(false);
   const [jobError, setJobError] = useState<string | null>(null);
+  const [jobDetail, setJobDetail] = useState<string | null>(null);
+  const [cancelled, setCancelled] = useState(false);
+  // 任务开始时选的模型还没下载：后端会先在 job 线程里下模型，界面必须说清进度为什么不动。
+  const [fetchingModel, setFetchingModel] = useState(false);
   const jobWsRef = useRef<WsHandle | null>(null);
 
   const loadModels = useCallback(async () => {
@@ -239,7 +279,7 @@ export default function App() {
       setModelId((cur) => cur || res.default_id);
       if (res.compute) setCompute(res.compute);
     } catch (e) {
-      setModelsError(e instanceof SubtitleApiError ? e.message : "无法获取模型列表");
+      setModelsError(e instanceof SubtitleApiError ? e.message : "拿不到模型列表，后台可能还没起来");
     }
   }, []);
 
@@ -251,22 +291,28 @@ export default function App() {
   const currentModel = useMemo(() => models.find((m) => m.id === modelId), [models, modelId]);
   const supportsHotwords = /contextual/.test(modelId);
   const diarAvailable = !!currentModel?.diarization;  // 仅完整版 + Paraformer
+  const modelNotDownloaded = !!currentModel && !currentModel.downloaded;
+
+  const clearRunState = useCallback(() => {
+    setJob(null);
+    setJobError(null);
+    setJobDetail(null);
+    setStage(null);
+    setPercent(0);
+    setCancelled(false);
+    setFetchingModel(false);
+  }, []);
 
   const pickFile = (f: File | null) => {
     setFile(f);
-    setJob(null);
-    setJobError(null);
-    setStage(null);
-    setPercent(0);
+    clearRunState();
   };
 
   const start = useCallback(async () => {
     if (!file || running) return;
     setRunning(true);
-    setJob(null);
-    setJobError(null);
-    setStage(null);
-    setPercent(0);
+    clearRunState();
+    setFetchingModel(modelNotDownloaded);
     try {
       const { job_id } = await createJob(file, {
         modelId,
@@ -278,7 +324,7 @@ export default function App() {
         punctuation,
       });
       jobWsRef.current?.close();
-      let settled = false;  // 是否已收到终态(done/error)，用于区分「正常关闭」与「意外断开」
+      let settled = false;  // 是否已收到终态，用于区分「正常关闭」与「意外断开」
       jobWsRef.current = subscribeJob(job_id, {
         onEvent: (ev) => {
           if (ev.type === "progress") {
@@ -289,22 +335,33 @@ export default function App() {
             setJob(ev.job);
             setPercent(100);
             setRunning(false);
+            setFetchingModel(false);
             jobWsRef.current?.close();
             jobWsRef.current = null;
           } else if (ev.type === "error") {
             settled = true;
-            setJobError(ev.message || "转写失败");
             setRunning(false);
+            setFetchingModel(false);
+            // 用户主动取消不是失败：后端用 code=cancelled 报，这里按取消收口。
+            if (ev.code === "cancelled") {
+              setJob(null);
+              setStage(null);
+              setPercent(0);
+              setCancelled(true);
+            } else {
+              setJobError(ev.message || "转写没完成");
+              setJobDetail(ev.detail ?? null);
+            }
           }
         },
         onError: () => {
-          setJobError((prev) => prev ?? "转写连接中断");
+          setJobError((prev) => prev ?? "连不上后台了，转写中断");
           setRunning(false);
         },
         onClose: () => {
-          // 没收到 done/error 就断开（服务重启/代理掉线）：别让界面永远卡在「转写中」
+          // 没收到终态就断开（服务重启/代理掉线）：别让界面永远卡在「正在转写」
           if (!settled) {
-            setJobError((prev) => prev ?? "连接意外断开，请重试");
+            setJobError((prev) => prev ?? "后台断了，请点重试");
             setRunning(false);
           }
         },
@@ -319,47 +376,78 @@ export default function App() {
         created_at: new Date().toISOString(),
       });
     } catch (e) {
-      setJobError(e instanceof SubtitleApiError ? e.message : "创建任务失败");
+      if (e instanceof SubtitleApiError) {
+        setJobError(e.message);
+        setJobDetail(e.detail ?? null);
+      } else {
+        setJobError("任务没发出去，重试一下");
+      }
       setRunning(false);
+      setFetchingModel(false);
     }
-  }, [file, running, modelId, language, diarization, diarAvailable, hotwords, maxChars, punctuation]);
+  }, [file, running, modelId, language, diarization, diarAvailable, hotwords, maxChars, punctuation, modelNotDownloaded, clearRunState]);
 
+  // 取消：不管后端什么时候确认，界面立刻从「在跑」回到「可重来」，不留半截进度卡。
   const onCancel = useCallback(async () => {
     if (!job) return;
-    try {
-      await cancelJob(job.id);
-    } catch { /* best-effort */ }
     jobWsRef.current?.close();
     jobWsRef.current = null;
     setRunning(false);
-    setStage(null);
-  }, [job]);
+    clearRunState();
+    setCancelled(true);  // 屏上的「已取消转写」回执就是反馈，不再叠一条 toast
+    try {
+      await cancelJob(job.id);
+    } catch { /* best-effort */ }
+  }, [job, clearRunState]);
 
   const onShutdown = useCallback(async () => {
     try {
       await shutdown();
-      message.info("已退出，可关闭此页");
+      message.info("服务已停止，可以关掉这个页面了");
     } catch { /* process may close before responding */ }
   }, [message]);
 
   const isDone = !!job && job.status === "done";
-  const showProgress = running || (!!job && !isDone && !jobError);
+  const showProgress = running || (!!job && !isDone && !jobError && !cancelled);
   const stageIndex = stage ? STAGE_FLOW.indexOf(stage) : -1;
+  const startLabel = running
+    ? "正在转写…"
+    : isDone
+      ? "重新转写"
+      : modelNotDownloaded
+        ? "下载并转写"
+        : "开始转写";
+
+  // 结果卡排在设置之前：跑完第一眼就能看到字幕（否则整块落在折叠下方）。
+  const results = isDone && job ? <ResultsPanel job={job} /> : null;
 
   return (
     <div style={{ position: "relative", zIndex: 1, minHeight: "100%", padding: "32px 20px 80px" }}>
       <div style={{ maxWidth: 860, margin: "0 auto" }}>
         {/* 走带条 / Transport bar */}
         <Flex justify="space-between" align="center" className="rise" style={{ marginBottom: 26 }}>
-          <Flex align="center" gap={12}>
+          <Flex align="center" gap={12} wrap>
             <span className={`rec-dot${running ? " live" : ""}`} />
-            <span className="wordmark" style={{ fontSize: 20 }}>funasr-subtitle</span>
-            <span className="label-cap" style={{ marginLeft: 6 }}>本地 · 离线 转写</span>
+            <span className="wordmark nowrap" style={{ fontSize: 20 }}>funasr-subtitle</span>
+            <span className="label-cap nowrap" style={{ marginLeft: 6 }}>
+              <span className="cap-cn">本地 · 离线 · 转写</span>
+            </span>
           </Flex>
           <Space size={10}>
-            <Tag color={compute.startsWith("GPU") ? "gold" : "default"} className="mono" style={{ marginRight: 0 }}>{compute}</Tag>
-            <Popconfirm title="退出 funasr-subtitle？" okText="退出" cancelText="取消" onConfirm={onShutdown}>
-              <Button color="danger" variant="text" icon={<PoweroffOutlined />} size="small">退出</Button>
+            <Tag color={compute.startsWith("GPU") ? "gold" : "default"} style={{ marginRight: 0 }}>
+              {compute.startsWith("GPU") ? "用显卡跑" : "用 CPU 跑"}
+            </Tag>
+            <Popconfirm
+              title="要停止后台服务吗？"
+              description="正在跑的任务会中断，页面可以关掉。"
+              okText="停止服务"
+              cancelText="取消"
+              okButtonProps={{ danger: true, variant: "outlined" }}
+              onConfirm={onShutdown}
+            >
+              <Button className="btn-exit" color="danger" variant="text" icon={<PoweroffOutlined />} size="small">
+                停止服务
+              </Button>
             </Popconfirm>
           </Space>
         </Flex>
@@ -370,7 +458,7 @@ export default function App() {
               type="error"
               showIcon
               message={modelsError}
-              action={<Button size="small" icon={<ReloadOutlined />} onClick={() => void loadModels()}>重试</Button>}
+              action={<Button size="small" icon={<ReloadOutlined />} onClick={() => void loadModels()}>重新获取模型</Button>}
             />
           )}
 
@@ -380,8 +468,9 @@ export default function App() {
 
           {/* 装载 / 拖放区 */}
           <Card className="rise d1" variant="outlined">
-            <SectionLabel>SOURCE · 音视频</SectionLabel>
+            <SectionLabel en="SOURCE">音视频</SectionLabel>
             <Upload.Dragger
+              className="drop-zone"
               accept={ACCEPT_MEDIA}
               multiple={false}
               showUploadList={false}
@@ -389,34 +478,38 @@ export default function App() {
                 pickFile(f as unknown as File);
                 return false;
               }}
-              style={{ background: "transparent", borderColor: STUDIO.border }}
+              style={{ background: "transparent" }}
             >
               <Flex vertical align="center" gap={10} style={{ padding: "14px 0" }}>
                 <span className="eq"><i /><i /><i /><i /><i /></span>
                 {file ? (
                   <Text className="mono" style={{ color: STUDIO.amberSoft, fontSize: 15 }}>{file.name}</Text>
                 ) : (
-                  <Text type="secondary">把音频 / 视频拖到这里，或点击选择</Text>
+                  <Text type="secondary" className="label-hint">把音频或视频拖进来，也可以点击选择文件</Text>
                 )}
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  mp4 · mkv · mov · ts · mp3 · m4a · wav · flac · opus … 几乎任意含音轨的音视频
+                  常见格式都能读：mp4、mkv、mov、mp3、wav……只要里面有声音
                 </Text>
               </Flex>
             </Upload.Dragger>
           </Card>
 
+          {results}
+
           {/* 设置 */}
           <Card className="rise d2" variant="outlined">
-            <SectionLabel>SETTINGS · 设置</SectionLabel>
+            <SectionLabel en="SETTINGS">{isDone ? "设置 · 可改参数后重跑" : "设置"}</SectionLabel>
             <Flex vertical gap={18}>
               <Flex gap={28} wrap align="flex-start">
-                <Flex vertical gap={8}>
+                <Flex vertical gap={8} style={{ minWidth: 0, maxWidth: "100%" }}>
                   <Text type="secondary" style={{ fontSize: 12 }}>语言</Text>
-                  <Segmented
-                    value={language}
-                    onChange={(v) => setLanguage(v as Language)}
-                    options={LANGUAGE_OPTIONS.map((o) => ({ label: o.label, value: o.value }))}
-                  />
+                  <div className="seg-scroll">
+                    <Segmented
+                      value={language}
+                      onChange={(v) => setLanguage(v as Language)}
+                      options={LANGUAGE_OPTIONS.map((o) => ({ label: o.label, value: o.value }))}
+                    />
+                  </div>
                 </Flex>
                 <Flex vertical gap={8} style={{ minWidth: 280, flex: 1 }}>
                   <Text type="secondary" style={{ fontSize: 12 }}>模型</Text>
@@ -435,71 +528,84 @@ export default function App() {
               <Flex gap={28} wrap align="flex-end">
                 <Flex vertical gap={8} style={{ flex: 1, minWidth: 240 }}>
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    热词{!supportsHotwords && "（仅热词版模型生效）"}
+                    热词{!supportsHotwords && "（只有「热词版」模型认）"}
                   </Text>
                   <Input
                     value={hotwords}
                     onChange={(e) => setHotwords(e.target.value)}
-                    placeholder="空格分隔，可空"
+                    placeholder="输入关键词，用空格分开（可不填）"
                     disabled={!supportsHotwords}
                   />
                 </Flex>
-                <Flex vertical gap={8}>
-                  <Tooltip title="每行最大显示宽度：中文按字数，英文按半字（默认 30≈中文30字/英文60字）。0=不限制，只按句末标点切；超长在标点/词边界断，不拆英文词。">
-                    <Text type="secondary" style={{ fontSize: 12 }}>每行最大字数（中文，英文自动放宽；0=不限制）</Text>
+                <Flex vertical gap={8} style={{ flex: 1, minWidth: 180, maxWidth: 260 }}>
+                  <Tooltip title="一行显示多少个字符。中文按字算，英文两个字母算一个。填 0 就只按句子断，不控长度。">
+                    <FieldLabel hint="0 = 不按长度断句">每行最多几个字</FieldLabel>
                   </Tooltip>
                   <InputNumber
                     min={0}
                     max={100}
                     value={maxChars}
                     onChange={(v) => setMaxChars((prev) => (v == null ? prev : v))}
-                    style={{ width: 160 }}
+                    style={{ width: "100%" }}
                   />
                 </Flex>
                 <Flex vertical gap={8}>
-                  <Tooltip title="自动：中文等自带标点的语言加句末标点，英文按停顿切、不强加（英文标点常不准）。加句末标点：都加。不加：都只按停顿/行宽切。">
-                    <Text type="secondary" style={{ fontSize: 12 }}>标点</Text>
+                  <Tooltip title="自动：中文加标点，英文按停顿断句（英文标点容易加错）。加标点：不管什么语言都加。不加标点：只按停顿和行宽断。">
+                    <FieldLabel>标点</FieldLabel>
                   </Tooltip>
                   <Segmented
                     value={punctuation}
                     onChange={(v) => setPunctuation(v as "auto" | "on" | "off")}
                     options={[
                       { label: "自动", value: "auto" },
-                      { label: "加句末标点", value: "on" },
-                      { label: "不加", value: "off" },
+                      { label: "加标点", value: "on" },
+                      { label: "不加标点", value: "off" },
                     ]}
                   />
                 </Flex>
               </Flex>
 
               <Tooltip title={diarAvailable
-                ? "用 cam++ 标注每段说话人，导出含 [spk0]/[spk1]…"
-                : "说话人分离仅在「完整版 + Paraformer 模型」下可用（完整版有 N 卡自动 GPU、无卡回退 CPU）；onnx 版与 SenseVoice 不支持"}>
+                ? "给每句字幕标上是谁说的，导出的字幕里会带 [spk0]、[spk1] 这样的记号"
+                : "只有「完整版」程序配 Paraformer 模型能区分说话人。轻量版（onnx）和 SenseVoice 做不到。"}>
                 <Flex align="center" gap={10}>
-                  <Switch checked={diarization && diarAvailable} disabled={!diarAvailable} onChange={setDiarization} />
+                  <span className="switch-hit">
+                    <Switch checked={diarization && diarAvailable} disabled={!diarAvailable} onChange={setDiarization} />
+                  </span>
                   <Text type={diarAvailable ? undefined : "secondary"}>
-                    说话人分离{diarAvailable ? "" : "（需完整版+Paraformer）"}
+                    区分说话人{diarAvailable ? "" : "（需完整版 + Paraformer）"}
                   </Text>
                 </Flex>
               </Tooltip>
 
-              <Flex gap={12} align="center">
-                <Button
-                  color="primary"
-                  variant="solid"
-                  size="large"
-                  icon={<AudioOutlined />}
-                  disabled={!file}
-                  loading={running}
-                  onClick={start}
-                >
-                  {running ? "转写中…" : "开始转写"}
-                </Button>
-                {running && <Button variant="outlined" onClick={onCancel}>取消</Button>}
-                {currentModel && !running && (
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {currentModel.name}
-                  </Text>
+              {!needsDownload && modelNotDownloaded && currentModel && (
+                <ModelDownloadPanel
+                  model={currentModel}
+                  caption="这个模型还没下载"
+                  onDownloaded={loadModels}
+                />
+              )}
+
+              <Flex vertical gap={8}>
+                <Flex gap={12} align="center" wrap>
+                  <Button
+                    color="primary"
+                    variant="solid"
+                    size="large"
+                    icon={<AudioOutlined />}
+                    disabled={!file}
+                    loading={running}
+                    onClick={start}
+                  >
+                    {startLabel}
+                  </Button>
+                  {running && <Button variant="outlined" onClick={onCancel}>取消</Button>}
+                  {!running && file && (
+                    <Button variant="text" onClick={() => pickFile(null)}>换个文件</Button>
+                  )}
+                </Flex>
+                {!file && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>先选一个音视频文件，才能开始转写。</Text>
                 )}
               </Flex>
             </Flex>
@@ -508,10 +614,10 @@ export default function App() {
           {/* 进度 */}
           {showProgress && (
             <Card className="rise" variant="outlined">
-              <SectionLabel>PROGRESS · {stage ? STAGE_LABELS[stage] : "排队中"} · {Math.round(percent)}%</SectionLabel>
+              <SectionLabel en="PROGRESS">{stage ? STAGE_LABELS[stage] : "等待开始"}</SectionLabel>
               <Steps
                 size="small"
-                current={stageIndex < 0 ? 0 : stageIndex}
+                current={stageIndex}
                 items={STAGE_FLOW.map((s) => ({ title: STAGE_LABELS[s] }))}
                 style={{ marginBottom: 16 }}
               />
@@ -520,12 +626,47 @@ export default function App() {
                 strokeColor={{ from: STUDIO.amber, to: STUDIO.amberSoft }}
                 status={running ? "active" : "normal"}
               />
+              {fetchingModel && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  第一次用这个模型，正在先下载（约 {currentModel?.size_mb.toFixed(0) ?? "若干"} MB），
+                  进度可能长时间停在「读音频」。
+                </Text>
+              )}
             </Card>
           )}
 
-          {jobError && <Alert type="error" showIcon message="转写失败" description={jobError} className="rise" />}
+          {cancelled && !jobError && (
+            <Alert
+              type="info"
+              showIcon
+              message="已取消转写"
+              description="文件还在，随时可以重新开始。"
+              className="rise"
+            />
+          )}
 
-          {isDone && job && <ResultsPanel job={job} />}
+          {jobError && (
+            <Alert
+              type="error"
+              showIcon
+              message="转写没完成"
+              description={
+                <Flex vertical gap={6}>
+                  <span>{jobError}</span>
+                  {jobDetail && (
+                    <details>
+                      <summary style={{ cursor: "pointer" }}>查看详情</summary>
+                      <pre className="mono" style={{ whiteSpace: "pre-wrap", fontSize: 11.5, margin: "6px 0 0" }}>
+                        {jobDetail}
+                      </pre>
+                    </details>
+                  )}
+                </Flex>
+              }
+              action={<Button size="small" icon={<ReloadOutlined />} onClick={start}>重新转写</Button>}
+              className="rise"
+            />
+          )}
         </Flex>
       </div>
     </div>
