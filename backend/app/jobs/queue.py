@@ -1,9 +1,13 @@
 """任务队列 + 状态机 + 事件广播（§6B, §7, §8）。
 
 - 单用户单机：内存存储 Job + 一个后台 worker 线程串行处理队列。
+  Job 常驻全部 segments，故按 MAX_JOBS 封顶：超出后从最旧的**终态**任务开始丢弃，
+  排队中/执行中的永不丢。
 - ASR 是阻塞型 CPU 任务，放在 worker 线程里跑；通过 EventBroker 把进度事件
   跨线程投递到 asyncio 侧的 WebSocket。
-- 引擎按 model_id 缓存复用（加载昂贵）。
+- 引擎缓存：键是 (model_id, use_gpu, diarization)——三者任一不同就是另一组 ONNX session，
+  所以键比 model_id 细。加载昂贵故命中复用；同时按 ENGINE_CACHE_SIZE 做 LRU 淘汰，
+  否则来回切模型会把内存吃光（实测 4 键切换 1857MB → 2 键 1027MB，见 engine/README.md §7）。
 """
 from __future__ import annotations
 
@@ -13,13 +17,14 @@ import shutil
 import threading
 import traceback
 import uuid
+from collections import OrderedDict
 from pathlib import Path
-from typing import Optional
+from typing import ClassVar
 
-from ..config import jobs_dir
+from ..config import ENGINE_CACHE_SIZE, MAX_JOBS, jobs_dir
 from ..engine import build_engine
 from ..media import DecodeCancelled, DecodeError, decode_to_16k_mono
-from ..schemas import Job, JobError, JobOptions, JobStatus, Segment
+from ..schemas import Job, JobError, JobOptions, JobStatus
 
 
 class EventBroker:
@@ -27,7 +32,7 @@ class EventBroker:
 
     def __init__(self) -> None:
         self._subs: dict[str, list[asyncio.Queue]] = {}
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._lock = threading.Lock()
 
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -66,9 +71,9 @@ class JobManager:
         self._q: _queue.Queue[str] = _queue.Queue()
         self._inputs: dict[str, Path] = {}
         self._cancels: dict[str, threading.Event] = {}
-        self._engines: dict[str, object] = {}
+        self._engines: OrderedDict[str, object] = OrderedDict()  # model_id -> 引擎（LRU）
         self._engine_lock = threading.Lock()
-        self._worker: Optional[threading.Thread] = None
+        self._worker: threading.Thread | None = None
         self._stop = threading.Event()
 
     # ---- 生命周期 ----
@@ -101,7 +106,7 @@ class JobManager:
         self._q.put(job_id)
         return job
 
-    def get(self, job_id: str) -> Optional[Job]:
+    def get(self, job_id: str) -> Job | None:
         return self.jobs.get(job_id)
 
     def cancel(self, job_id: str) -> bool:
@@ -140,13 +145,24 @@ class JobManager:
                 self._cleanup_input(job_id)
 
     def _get_engine(self, model_id: str, use_gpu: bool = False, diarization: bool = False):
+        """取（必要时加载）引擎。命中复用——ONNX session 加载很贵。
+
+        缓存是 LRU：超过 ENGINE_CACHE_SIZE 就丢弃最久未用的那个，被丢弃的引擎引用计数
+        归零后其 ONNX session 占的常驻内存随之释放（否则来回切模型会把内存吃光）。
+        淘汰安全前提：任务由**单个 worker 线程串行**执行，_get_engine 与随后的 transcribe
+        同线程顺序发生，不存在「另一个任务正在用被淘汰的引擎」。
+        """
         key = f"{model_id}|gpu={use_gpu}|diar={diarization}"
         with self._engine_lock:
             eng = self._engines.get(key)
-            if eng is None:
-                eng = build_engine(model_id, use_gpu=use_gpu, diarization=diarization)
-                eng.load()
-                self._engines[key] = eng
+            if eng is not None:
+                self._engines.move_to_end(key)  # 命中 -> 顶回最新
+                return eng
+            eng = build_engine(model_id, use_gpu=use_gpu, diarization=diarization)
+            eng.load()
+            self._engines[key] = eng
+            while len(self._engines) > ENGINE_CACHE_SIZE:
+                self._engines.popitem(last=False)  # 丢最久未用的
             return eng
 
     def _process(self, job: Job) -> None:
@@ -187,7 +203,7 @@ class JobManager:
         self.broker.publish(f"job:{job.id}", {"type": "done", "job": job.model_dump(mode="json")})
 
     # ---- 状态/事件 helpers ----
-    _STAGE_TO_STATUS = {
+    _STAGE_TO_STATUS: ClassVar[dict[str, JobStatus]] = {
         "decoding": JobStatus.decoding, "vad": JobStatus.vad, "asr": JobStatus.asr,
         "punc": JobStatus.punc, "diar": JobStatus.diar, "assembling": JobStatus.assembling,
     }
@@ -207,7 +223,7 @@ class JobManager:
         self.broker.publish(f"job:{job.id}",
                             {"type": "progress", "stage": stage, "percent": round(percent, 1)})
 
-    def _fail(self, job: Job, code: str, message: str, detail: Optional[str] = None) -> None:
+    def _fail(self, job: Job, code: str, message: str, detail: str | None = None) -> None:
         job.status = JobStatus.error
         job.error = JobError(code=code, message=message, detail=detail)
         self.broker.publish(f"job:{job.id}", {
@@ -220,19 +236,38 @@ class JobManager:
         job.error = JobError(code="cancelled", message="已取消转写")
         self.broker.publish(f"job:{job.id}", {"type": "error", "code": "cancelled", "message": "已取消转写"})
 
+    def _prune_jobs(self) -> None:
+        """丢弃超出 MAX_JOBS 上限的最旧**终态**任务。
+
+        每个 Job 常驻全部 segments，长会话下不设限会无限增长。
+        只裁剪 done/error——排队中/执行中的任务绝不丢，否则 get() 会让 UI 误报
+        「任务不存在，可能后台已经重启」。dict 保持插入序（= 创建序），从头丢弃即可。
+        被裁掉的任务再导出时按既有逻辑回 404（见 routes.export_job）。
+        """
+        overflow = len(self.jobs) - MAX_JOBS
+        if overflow <= 0:
+            return
+        for job_id, job in list(self.jobs.items()):
+            if overflow <= 0:
+                break
+            if job.status.value in {"done", "error"}:
+                self.jobs.pop(job_id, None)
+                overflow -= 1
+
     def _cleanup_input(self, job_id: str) -> None:
-        """终态清理：删上传目录 + 丢弃 cancel 事件（避免长会话下 _cancels 无限增长）。
+        """终态清理：删上传目录 + 丢弃 cancel 事件 + 裁剪过期的已完成任务。
 
         输入文件不再需要（导出用的是内存里的 segments）。
         """
         self._cancels.pop(job_id, None)
         p = self._inputs.pop(job_id, None)
-        if not p:
-            return
-        try:
-            shutil.rmtree(Path(p).parent, ignore_errors=True)
-        except Exception:  # noqa: BLE001
-            pass
+        if p:
+            try:
+                shutil.rmtree(Path(p).parent, ignore_errors=True)
+            except Exception:  # noqa: BLE001
+                pass
+        # jobs 里只剩「终态且未超上限」的部分，长会话不再无限堆积 segments。
+        self._prune_jobs()
 
     # ---- 清理 ----
     def cleanup(self) -> None:

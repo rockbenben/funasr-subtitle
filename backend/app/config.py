@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Optional
 
 from platformdirs import user_data_dir
 
@@ -20,7 +19,7 @@ APP_AUTHOR = False  # platformdirs: 不加作者层级 -> %LOCALAPPDATA%\funasr-
 # ---- 可调开关（全部可用环境变量覆盖，方便用户自行调节）----
 # 约定：环境变量名 = FUNASR_SUBTITLE_<NAME>。空/非法值回退默认。
 
-def _env(name: str) -> Optional[str]:
+def _env(name: str) -> str | None:
     v = os.environ.get(f"FUNASR_SUBTITLE_{name}")
     return v if v not in (None, "") else None
 
@@ -58,6 +57,12 @@ MAX_CUE_MS = _env_int("MAX_CUE_MS", 7000)
 DEFAULT_MAX_CHARS = _env_int("MAX_CHARS", 30)
 # 上传大小上限（MB，0=不限制）
 MAX_UPLOAD_MB = _env_int("MAX_UPLOAD_MB", 0)
+# 内存里保留的已完成任务数上限：每个 Job 常驻全部 segments，不设限则长会话下无限增长。
+# 超出后从最旧的终态任务开始丢弃（排队/执行中的任务永不丢弃）。
+MAX_JOBS = _env_int("MAX_JOBS", 50)
+# 常驻引擎缓存上限：每个引擎持有一组 ONNX session（单个模型数百 MB），切换模型若只增不减
+# 会把内存吃光。任务在 worker 线程里串行执行，同时最多只有一个引擎在用，留 2 个足够。
+ENGINE_CACHE_SIZE = max(1, _env_int("ENGINE_CACHE_SIZE", 2))
 # onnxruntime 线程数（0=onnxruntime 默认）
 NUM_THREADS = _env_int("NUM_THREADS", 4)
 # ct-punc 长文本分块长度
