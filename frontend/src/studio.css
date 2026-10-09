@@ -160,7 +160,7 @@ body::after {
 }
 .ant-upload.ant-upload-drag.drop-zone.ant-upload-drag-hover .label-hint { color: var(--amber-soft); }
 
-/* ---- 结果列表内滚：底部渐隐，提示「下面还有」---- */
+/* ---- 结果列表内滚：底部渐隐，提示「下面还有」（仅在真的还能滚时挂上，见 ResultsPanel）---- */
 .scroll-fade {
   mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 34px), transparent 100%);
   -webkit-mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 34px), transparent 100%);

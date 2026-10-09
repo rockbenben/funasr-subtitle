@@ -1,0 +1,116 @@
+<!doctype html>
+<!--
+  GitHub 社交预览图（og:image）的版式源文件，交付物是 docs/social-preview.png（1280×640）。
+  界面截图直接引用 README 首屏图，两张公开图因此不会互相打架；换掉 screenshot.png 后重跑：
+
+    node <html-shot>/render.mjs docs/social-card.html docs/social-preview.png --base .
+
+  @font-face 与 <img> 都按站点绝对路径解析，`--base .`（仓库根）是它们的根。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>social preview card</title>
+<style>
+  @font-face {
+    font-family: "Space Mono";
+    src: url("/frontend/node_modules/@fontsource/space-mono/files/space-mono-latin-400-normal.woff2") format("woff2");
+    font-weight: 400;
+  }
+  @font-face {
+    font-family: "Space Mono";
+    src: url("/frontend/node_modules/@fontsource/space-mono/files/space-mono-latin-700-normal.woff2") format("woff2");
+    font-weight: 700;
+  }
+  :root {
+    --bg: #141210; --ink: #ece4d5; --dim: #a89c86;
+    --amber: #e8a33d; --amber-soft: #f0be6e; --border: #3a342b;
+    --safe: 40px;   /* GitHub repo card 模板唯一硬要求：重要内容四周留 40pt */
+    --cjk: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+    --mono: "Space Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    position: relative;
+    width: 1280px; height: 640px; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg); color: var(--ink); font-family: var(--cjk);
+    background-image:
+      radial-gradient(120% 80% at 20% -12%, rgba(232, 163, 61, 0.14), transparent 62%),
+      radial-gradient(80% 60% at 100% 0%, rgba(120, 80, 40, 0.10), transparent 55%);
+  }
+  /* 与产品同一层颗粒噪点 */
+  body::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  /* 安全区是结构不是运气：所有内容都装在这个 40pt 内缩盒里 */
+  .safe {
+    position: relative; z-index: 1;
+    width: calc(1280px - var(--safe) * 2);
+    height: calc(640px - (var(--safe) + 8px) * 2);  /* 纵向多留 8px：页脚不贴着安全线 */
+    display: flex; flex-direction: column;
+  }
+  .grid { display: grid; grid-template-columns: 1fr 620px; gap: 40px; align-items: center; flex: 1; min-height: 0; }
+  .brand { display: flex; align-items: center; gap: 15px; }
+  .dot {
+    width: 15px; height: 15px; border-radius: 50%; background: var(--amber);
+    box-shadow: 0 0 18px rgba(232, 163, 61, .85); flex: 0 0 auto;
+  }
+  h1 {
+    font-family: var(--mono); font-weight: 700; font-size: 48px; line-height: 1;
+    letter-spacing: -.02em; margin: 0; white-space: nowrap;
+  }
+  .cap { font-family: var(--mono); font-size: 18px; letter-spacing: .08em; color: var(--dim); margin: 14px 0 0; }
+  .tagline { font-size: 33px; font-weight: 600; line-height: 1.36; margin: 22px 0 0; }
+  .tagline em { font-style: normal; color: var(--amber-soft); }
+  .sub { font-size: 19px; color: var(--dim); margin: 12px 0 0; line-height: 1.5; }
+  .chips { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 24px; }
+  .chip {
+    font-size: 18px; padding: 6px 14px; border-radius: 999px;
+    border: 1px solid var(--border); background: rgba(255, 255, 255, .03); color: #d9cdb8;
+  }
+  .chip.hot { border-color: #6b5326; background: rgba(232, 163, 61, .14); color: var(--amber-soft); }
+  .shot {
+    border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: #17140f;
+    box-shadow: 0 24px 60px -18px rgba(0, 0, 0, .85), 0 0 0 1px rgba(255, 255, 255, .03);
+  }
+  .shot img {
+    display: block; width: 100%;
+    /* 底部渐隐：既提示「下面还有」，也让画面收在框里而不是被切一刀 */
+    mask-image: linear-gradient(180deg, #000 0, #000 82%, rgba(0, 0, 0, .35) 100%);
+    -webkit-mask-image: linear-gradient(180deg, #000 0, #000 82%, rgba(0, 0, 0, .35) 100%);
+  }
+  .foot {
+    font-family: var(--mono); font-size: 16px; color: #7d7365; letter-spacing: .04em;
+    margin-top: 18px; display: flex; gap: 14px;
+  }
+  .foot span { color: #4d463b; }
+  /* 自检：给 body 加 .guides 就画出 40pt 安全框，交付版不带 */
+  body.guides::after {
+    content: ""; position: absolute; inset: var(--safe); z-index: 9;
+    border: 2px dashed #da3633; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+  <div class="safe">
+    <div class="grid">
+      <div>
+        <div class="brand"><span class="dot"></span><h1>funasr-subtitle</h1></div>
+        <p class="cap">本地 · 离线 · 转写</p>
+        <p class="tagline">拖进音视频，<br />拿到<em>带时间戳</em>的字幕</p>
+        <p class="sub">基于 FunASR ONNX 推理，纯 CPU 就能跑完长音频。</p>
+        <div class="chips">
+          <span class="chip hot">中文 / 粤语强于 Whisper</span>
+          <span class="chip">Windows x64 便携包</span>
+          <span class="chip">SRT · VTT · TXT · JSON</span>
+        </div>
+      </div>
+      <div class="shot"><img src="/docs/screenshot.png" alt="funasr-subtitle 转写完成界面：字幕列表与导出按钮" /></div>
+    </div>
+    <div class="foot">365 开源计划 #012<span>·</span>MIT<span>·</span>不上传任何音视频</div>
+  </div>
+</body>
+</html>

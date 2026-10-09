@@ -62,7 +62,7 @@ const ACCEPT_MEDIA = [
   ".mp4", ".m4v", ".mkv", ".mov", ".avi", ".wmv", ".flv", ".webm", ".ts", ".m2ts",
   ".mts", ".vob", ".mpg", ".mpeg", ".3gp", ".3g2", ".ogv", ".rmvb", ".asf", ".f4v",
 ].join(",");
-// 进度阶段顺序（diar 本期不支持，跳过）
+// 进度阶段顺序（diarization：onnx 后端没有对应实现，故跳过）
 const STAGE_FLOW: Stage[] = ["decoding", "vad", "asr", "punc", "assembling"];
 
 function formatTimestamp(ms: number): string {

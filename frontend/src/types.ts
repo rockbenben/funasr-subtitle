@@ -1,4 +1,4 @@
-// Mirror of the backend data model (§8 / API contract).
+// Mirror of the backend data model.
 
 export type JobStatus =
   | "queued"
