@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+  pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend · ruff + pytest (${{ matrix.os }})
+    # 主目标是 Windows（便携包只在 Windows 发），但测试本身跨平台，两个都跑更保险。
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"   # 与 pyproject requires-python 保持一致
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      # 解码层测试（ffprobe 校验 / 流式 PCM / 无音轨提前报错）需要真实的 ffmpeg+ffprobe，
+      # 否则整个 tests/test_decode.py 会被 skip 掉，回归就形同虚设。
+      - name: install ffmpeg (linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: install ffmpeg (windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --no-progress -y
+
+      - name: verify ffmpeg present
+        run: |
+          ffmpeg -version
+          ffprobe -version
+
+      # 只装 `[dev]`：= pyproject 的轻量基础依赖 + pytest/httpx/ruff。
+      # 刻意**不装** `[onnx]`（funasr-onnx/onnxruntime/modelscope，几百 MB）——
+      # 需要真实推理的用例在模型未缓存时会自动 skip，这样 CI 几分钟就能跑完。
+      - name: install test deps
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: ruff
+        working-directory: backend
+        run: python -m ruff check .
+
+      # 用 `python -m pytest` 而不是 `pytest`：前者会把当前目录（backend/）放进 sys.path，
+      # 测试里的 `from app...` 导入才成立；直接调 pytest 在 CI 里会 ImportError。
+      - name: pytest
+        working-directory: backend
+        run: python -m pytest -q --tb=short
+
+  frontend:
+    name: frontend · typecheck + build + 对比度
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          # 与本地开发环境保持一致；Node 20 已于 2026-04 EOL。
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: install deps
+        working-directory: frontend
+        run: npm ci
+
+      # build = tsc -b && vite build，类型错误会直接让这一步失败
+      - name: typecheck + build
+        working-directory: frontend
+        run: npm run build
+
+      # 配色对比度守护（WCAG AA）：纯 node 脚本，读 studio.css，无头无依赖
+      - name: contrast check
+        working-directory: frontend
+        run: npm run check:contrast
