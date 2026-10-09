@@ -2,11 +2,10 @@
 
 # funasr-subtitle
 
-**纯本地 · 离线 · 极快 · 纯 CPU 即可运行的 Windows 音视频转写 / 字幕生成工具**
-
-Windows 音视频转字幕，纯本地离线、CPU 即可跑，中文粤语强于 Whisper
+**纯本地离线，音视频直接出带时间戳字幕，中文粤语强于 Whisper**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/rockbenben/funasr-subtitle/actions/workflows/ci.yml/badge.svg)](https://github.com/rockbenben/funasr-subtitle/actions/workflows/ci.yml)
 [![365 开源计划 #012](https://img.shields.io/badge/365%20%E5%BC%80%E6%BA%90%E8%AE%A1%E5%88%92-%23012-1f6feb)](https://github.com/rockbenben/365opensource)
 
 **[⬇ 下载最新版](https://github.com/rockbenben/funasr-subtitle/releases/latest)** —— Windows x64 便携包，解压双击即用
@@ -18,7 +17,7 @@ Windows 音视频转字幕，纯本地离线、CPU 即可跑，中文粤语强�
 
 <br>
 
-<img src="docs/screenshot.png" alt="funasr-subtitle 界面：拖入音视频，选语言 / 模型，一键转写导出字幕" width="760">
+<img src="docs/screenshot.png" alt="funasr-subtitle 界面：拖入音视频后转写出的字幕，带时间码，可导出 .srt / .vtt / .txt / .json" width="760">
 
 </div>
 
@@ -49,41 +48,35 @@ Windows 音视频转字幕，纯本地离线、CPU 即可跑，中文粤语强�
 - 🎯 **多模型可选** — SenseVoiceSmall（快·多语言）/ Paraformer-zh（中文高精度）/ Paraformer-zh 热词版（支持热词）。
 - 🌐 **多语言** — 中文 / 粤语 / 英语 / 日语 / 韩语，可自动识别或手动指定。
 - ✂️ **专业字幕切分** — 按标点 / 停顿切句；每行「显示宽度」可调（中日韩字符算 1、拉丁/数字算 0.5，默认 30 ≈ 中文 30 字 / 英文 ~60 字，上限 100，`0` = 不限制）+ 单条 ≤ 7s，断点取 句末 > 子句 > 词边界，不拆英文词；最终 cue 严格单调不重叠。
-- 🔤 **标点模式可选** — `自动`（默认：中文等自带标点的语言加句末标点；**英文按停顿切、不强加**——英文模型标点常不准，错位句号会把一句切碎）/ `加句末标点` / `不加`。
+- 🔤 **标点模式可选** — `自动`（默认：中文等自带标点的语言加句末标点；**英文按停顿切、不强加**——英文模型标点常不准，错位句号会把一句切碎）/ `加标点` / `不加标点`。
 - 📝 **多格式导出** — SRT / VTT / TXT / JSON，或一键「复制全文」。
 - 👥 **说话人分离（可选）** — 用 cam++ 标注每段说话人，导出含 `[spk0]`/`[spk1]`…；**仅完整版 + Paraformer 模型**可用（完整版有 N 卡自动用 GPU、无卡回退 CPU）；onnx 版与 SenseVoice 不支持。
 
 ## 📦 下载
 
-前往 **[Releases](../../releases/latest)** 下载 Windows x64 便携包，解压 → 双击 `funasr-subtitle.exe` → 浏览器里用。两份功能 / 界面一致，只差推理后端：
+前往 **[Releases](https://github.com/rockbenben/funasr-subtitle/releases/latest)** 下载 Windows x64 便携包，解压 → 双击 `funasr-subtitle.exe` → 浏览器里用。两份功能 / 界面一致，只差推理后端：
 
-| 包                                   | 大小    | 后端                 | 适用                                                                          | 在哪个 release                                                              |
-| ------------------------------------ | ------- | -------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| **funasr-subtitle-win-x64.zip**      | ~340 MB | funasr-onnx · 纯 CPU | 绝大多数人首选（RTF ≈ 0.1，无需显卡）                                         | [最新版](https://github.com/rockbenben/funasr-subtitle/releases/latest)     |
-| **funasr-subtitle-cuda-win-x64.zip** | ~2.6 GB | 完整 funasr · torch  | 有 N 卡自动 GPU 加速、无卡回退 CPU；要说话人分离 / Paraformer 高精度 / 大模型 | [v0.1.0](https://github.com/rockbenben/funasr-subtitle/releases/tag/v0.1.0) |
+| 包                                   | 大小    | 后端                 | 适用                                                                          |
+| ------------------------------------ | ------- | -------------------- | ----------------------------------------------------------------------------- |
+| **funasr-subtitle-win-x64.zip**      | ~340 MB | funasr-onnx · 纯 CPU | 绝大多数人首选（RTF ≈ 0.1，无需显卡）                                         |
+| **funasr-subtitle-cuda-win-x64.zip** | ~2.6 GB | 完整 funasr · torch  | 有 N 卡自动 GPU 加速、无卡回退 CPU；要说话人分离 / Paraformer 高精度 / 大模型 |
 
 > [!NOTE]
 > 首次运行需联网下载模型（CPU 包默认 SenseVoice ≈ 235 MB），之后离线可用。
 > 程序未签名，SmartScreen 提示时点「更多信息」→「仍要运行」。
 
 > [!IMPORTANT]
-> **CUDA 包目前只在 [v0.1.0](https://github.com/rockbenben/funasr-subtitle/releases/tag/v0.1.0) 里**，最新版只发了 CPU 包，别在 latest 页面上找。
-> 它超过 GitHub 单文件 2 GB 上限，拆成了两个分卷。下载 `…cuda-win-x64.zip.001`
-> 和 `.002` 放同一目录，双击随附的 `merge-cuda-parts.bat`（或运行
-> `copy /b "…zip.001"+"…zip.002" "…zip"`）合并出完整 zip，再解压。CPU 包无需此步。
-
-> [!TIP]
-> 纯 CPU 用户首选上面的 onnx 包（小、快）。完整版主要是为 GPU 加速、说话人分离、
-> Paraformer 高精度准备的——它**也能在无卡机上跑**（自动 CPU），但体积大得多。
-> 有卡也想强制 CPU（排障/对比）可设环境变量 `FUNASR_SUBTITLE_FORCE_CPU=1`。
+> **CUDA 包超过 GitHub 单文件 2 GB 上限**，所以拆成了两个分卷：下载
+> `…cuda-win-x64.zip.001` 和 `.002` 放同一目录，双击随附的 `merge-cuda-parts.bat`
+> （或运行 `copy /b "…zip.001"+"…zip.002" "…zip"`）合并出完整 zip，再解压。CPU 包无需此步。
 
 ## 🚀 使用
 
 1. 双击 `funasr-subtitle.exe`，浏览器自动打开。
 2. 首次按页面提示下载默认模型（之后离线）。
-3. 拖入音频 / 视频 → 选语言 / 模型（可填热词、调每行最大字数、选标点模式）→ 点「开始转写」。
+3. 拖入音频 / 视频 → 选语言 / 模型（可填热词、调每行最多几个字、选标点模式）→ 点「开始转写」。
 4. 导出 SRT / VTT / TXT / JSON 或「复制全文」；`.srt` 可直接导入 [subtitle-translator](https://tools.newzone.top/zh/subtitle-translator) 翻译。
-5. 退出：页面右上角「退出」或右下角托盘图标。
+5. 退出：页面右上角「停止服务」或右下角托盘图标。
 
 ## ⚙️ 工作原理
 
@@ -102,26 +95,63 @@ Windows 音视频转字幕，纯本地离线、CPU 即可跑，中文粤语强�
 
 ## ⚠️ 已知局限
 
-- **英文默认不强加句末标点** — SenseVoice / ct-punc 的英文句末标点常不准，错位的句号会把一句切碎。因此「标点」默认 `自动` 时**英文走「按停顿」**：去掉句末 `.?!`（逗号 / 小数保留），只按语音停顿 + 行宽在词边界切，断行干净但没有完整书面句号。需要书面句标点可把「标点」切到 `加句末标点`（用 SenseVoice 自带标点，已处理 `e.g.`/`U.S.`/`Inc.` 缩写）。**中文 / 日文自带标点较准，默认自动加，不受影响。**
+- **英文默认不强加句末标点** — SenseVoice / ct-punc 的英文句末标点常不准，错位的句号会把一句切碎。因此「标点」默认 `自动` 时**英文走「按停顿」**：去掉句末 `.?!`（逗号 / 小数保留），只按语音停顿 + 行宽在词边界切，断行干净但没有完整书面句号。需要书面句标点可把「标点」切到 `加标点`（用 SenseVoice 自带标点，已处理 `e.g.`/`U.S.`/`Inc.` 缩写）。**中文 / 日文自带标点较准，默认自动加，不受影响。**
 - **时间戳为句级** — 足够做字幕，但不是逐词对齐，不适合逐词高亮 / 卡拉 OK 式效果。
 - **未签名** — Windows SmartScreen 会拦，需手动「更多信息」→「仍要运行」。
 
 ## 🛠️ 开发
 
-**环境**：Windows · Python 3.11 · Node 20+
+**环境**：Windows · Python 3.11（`pyproject.toml` 钉的是 `>=3.11,<3.12`）· Node 20+（CI 跑的是 24，本地也建议 24）
 
 ```powershell
-# 后端（在 backend/ 下运行）
-backend\.venv\Scripts\python -m uvicorn app.main:app --reload --port 8765
+# 后端：建 venv + 装依赖（只需一次）
+#   [dev] = pytest/httpx/ruff；[onnx] = funasr-onnx 推理栈（几百 MB）
+py -3.11 -m venv backend\.venv
+backend\.venv\Scripts\python -m pip install -e "backend[dev,onnx]"
+
+# 起后端
+cd backend; ..\backend\.venv\Scripts\python -m uvicorn app.main:app --reload --port 8765
 
 # 前端
 cd frontend; npm ci; npm run dev
 ```
 
+> **关于 DirectML 显卡加速**：`onnxruntime-directml` 和 `funasr-onnx` 依赖的纯 CPU 版
+> `onnxruntime` 提供同名包、会互相覆盖，pip 保证不了 DirectML 胜出；而且实测 DirectML
+> 对量化 ONNX 模型反而**慢 ~2.8×**，所以前端已隐藏该开关（`App.tsx` 里 `useGpu = false`），
+> 依赖里也就没列它。真想手动试的话，装完 `[onnx]` 后再补这一步并确认 provider 出现：
+>
+> ```powershell
+> backend\.venv\Scripts\python -m pip install --force-reinstall --no-deps onnxruntime-directml
+> backend\.venv\Scripts\python -c "import onnxruntime as ort; print(ort.get_available_providers())"
+> # -> ['DmlExecutionProvider', 'CPUExecutionProvider'] 才对
+> ```
+
+**跑检查**（和 CI 跑的是同一条命令）：
+
+```powershell
+cd backend
+.\.venv\Scripts\python -m ruff check .       # lint
+.\.venv\Scripts\python -m pytest             # 测试（需 ffmpeg/ffprobe 在 PATH，否则解码相关用例会 skip）
+
+cd ..\frontend
+npm run build          # tsc -b && vite build，类型错误直接失败
+npm run check:contrast # WCAG AA 对比度守护
+```
+
+> 解码层测试需要真实的 `ffmpeg` / `ffprobe`；需要真实模型推理的用例只在模型已缓存时运行，
+> 否则自动 skip（CI 里就是 skip 的）。CI 定义见 [`.github/workflows/ci.yml`](./.github/workflows/ci.yml)：
+> 后端在 Ubuntu + Windows 双平台跑 ruff + pytest，前端跑类型检查 / 构建 / 对比度。
+>
+> CI 只装 `[dev]` 那套轻依赖，不装 `[onnx]`（几百 MB），所以需要真实推理的用例在 CI 里是 skip 的。
+
 **打包便携包**（两种变体）：
 
 ```powershell
 # 默认变体：funasr-onnx 纯 CPU，~340 MB → funasr-subtitle-win-x64.zip
+#   ⚠️ build.ps1 不会替你装依赖，它直接用现成的 backend\.venv 冻结。
+#      ONNX 推理栈已拆到 [onnx] extra，所以这个 venv 必须是用
+#      `pip install -e "backend[onnx]"` 装出来的（漏装会导致包体缺 funasr-onnx）。
 powershell -ExecutionPolicy Bypass -File packaging\build.ps1
 
 # 完整变体：完整 funasr + torch/CUDA 真显卡加速，多 GB → funasr-subtitle-cuda-win-x64.zip
@@ -144,7 +174,18 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Variant full
 | `FUNASR_SUBTITLE_STALL_TIMEOUT` | 90                               | 解码卡死判定秒数                                   |
 | `FUNASR_SUBTITLE_NUM_THREADS`   | 4                                | onnxruntime 线程数                                 |
 | `FUNASR_SUBTITLE_PUNC_CHUNK`    | 110                              | ct-punc 长文本分块长度                             |
+| `FUNASR_SUBTITLE_MAX_JOBS`      | 50                               | 内存中保留的已完成任务数上限（超出丢弃最旧的）     |
+| `FUNASR_SUBTITLE_ENGINE_CACHE_SIZE` | 2                            | 常驻引擎缓存上限（LRU，超出淘汰最久未用的）       |
 | `FUNASR_SUBTITLE_DATA_DIR`      | `%LOCALAPPDATA%\funasr-subtitle` | 模型 / 任务数据目录                                |
+
+> 内存护栏：解码直接把 PCM 流式读进预分配缓冲区（不产生 2× 拷贝）；已完成任务与
+> 引擎会话都有上限，长视频 / 反复切模型也不会把内存顶爆。实测数据见
+> [`backend/app/engine/README.md`](./backend/app/engine/README.md) §7。
+
+**行尾（.gitattributes）**：仓库用 `* text=auto eol=lf`，索引与工作区统一 LF。
+本仓库同时设了 `core.autocrlf false`。别改回 `autocrlf=true`——那会让每次 checkout
+在 CRLF/LF 之间来回转换，既刷满 `LF will be replaced by CRLF` 警告，也容易在工具
+处理文本时把换行符吃掉（本仓库发生过 `.py` 被压成单行、无法运行）。
 
 ## 📄 License
 
@@ -160,4 +201,6 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Variant full
 
 ## 关于 365 开源计划
 
-[365 开源计划](https://github.com/rockbenben/365opensource) 的第 **#012** 个项目——一个人 + AI，一年 300+ 个开源项目。[提交你的需求 →](https://365.aishort.top/) · [Discord](https://discord.gg/PZTQfJ4GjX) · [Telegram](https://t.me/aishort_top)
+[365 开源计划](https://github.com/rockbenben/365opensource) 的第 **#012** 个项目——一个人 + AI，一年 300+ 个开源项目。
+
+[提交你的需求 →](https://365.aishort.top/) · [Discord](https://discord.gg/PZTQfJ4GjX) · [Telegram](https://t.me/aishort_top)
