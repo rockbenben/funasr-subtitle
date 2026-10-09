@@ -8,6 +8,23 @@
 > 第 1 节的 RTF / 准确率结论在纯 CPU 版上同样成立——那些本来就是 CPU 测量；
 > 只有第 6 节的 DirectML 数据需要额外手动装 `onnxruntime-directml`。
 
+## 0. 已验证的依赖版本（2026-10）
+
+两个包各自独立验证过，可作为「升上去没事」的依据：
+
+| 包 | 组件 | 验证版本 | 验证方式 |
+| --- | --- | --- | --- |
+| CPU / onnx | `funasr-onnx` | **0.4.3** | 全量 67 测试 + SenseVoice/Paraformer/热词版三条真实推理路径 |
+| CUDA / full | `funasr` | **1.4.16** | RTX 3080 Ti 上 SenseVoice / Paraformer / cam++ 三条真实推理路径 |
+
+**两处 0.4.1 时代的 workaround 在 0.4.3 上依然必需**（升级后没被上游修掉，也因此不能删）：
+
+- `ContextualParaformer.__init__` 仍然不设 `self.language`，加载后必须手动 `asr.language="zh"`（§6）
+- contextual 仓库仍然只有 `model_eb.onnx`，量化路径要的 `model_eb_quant.onnx` 仍需下载后本地复制（§6）
+
+升 `funasr-onnx` 时注意它声明 `numpy<=1.26.4`，**不要连带升 numpy 2**。
+
+
 ## 1. SenseVoiceSmall（默认 ASR）
 
 - **ONNX 来源**：官方 `iic/SenseVoiceSmall-onnx`（94 万+下载），含 `model_quant.onnx`（≈230MB）。
@@ -119,3 +136,36 @@ funasr-onnx 必须能 `import torch` 才能 import（`__init__` 会导入 sensev
   安全前提：任务由单个 worker 线程串行执行，不存在「另一个任务正在用被淘汰的引擎」。
 - **已完成任务**：每个 Job 常驻全部 segments，改为按 `MAX_JOBS`（默认 50）从最旧的
   **终态**任务开始丢弃；排队中/执行中的任务永不丢（否则 UI 会误报「任务不存在」）。
+
+## 8. 上游已知问题与本地缓解
+
+### funasr 丢弃无标点句尾（modelscope/FunASR#3754，截至 1.4.16 未发版）
+
+`funasr.utils.timestamp_tools.timestamp_sentence()` 只在遇到终止标点时才 flush 一句，
+于是**末尾那段没有终止标点的文本会被整段丢弃**——说话人说一半被打断、录音到点结束都
+很常见，表现为字幕尾部凭空少一截，而 `r0["text"]` 里其实还在。
+
+上游测试用例很直白：
+
+```python
+timestamp_sentence([1, 3, 1], [[0,100],[100,200],[200,300]], "你 好 世界")
+# 修复前: ["你好。"]          ← "世界" 整段丢失
+# 修复后: ["你好。", "世界"]
+```
+
+**本地缓解**：`FunasrFullEngine._recover_dropped_tail()` 比对「sentence_info 拼接出的
+文本」与「整段文本」的**实义字符**（必须忽略标点——ct-punc 会给 `sentence_info` 补句号，
+直接比原字符串会把标点差异误判成「多了内容」），确认确实是**前缀关系**（丢的是尾巴而不是
+中间）后，把剩下那截按「上一条结束 → 音频结束」的时间范围补回去，沿用上一条的说话人标签。
+
+两个刻意的取舍：
+
+- **时间戳不从 `timestamp` 对齐**。实测该数组按「非标点 token」给（本机 10.3s 样本：
+  32 条时间戳 vs 36 个非空白字符），和字符数对不上，硬对齐更容易错。宁可时间范围略宽，
+  也不能把字丢了。
+- **对不上就原样返回**。中间缺段、非前缀关系、时间上没地方放——一律不猜，交给原有兜底路径。
+
+回归见 `tests/test_full_tail_recovery.py`（含「不误伤」路径：覆盖完整时不得补、纯标点
+差异不得补、中间缺段不得猜、时间不够不得硬塞）。
+
+⚠️ **上游发版后应删掉这段缓解**（届时 `_recover_dropped_tail` 会恒等返回，可直接移除调用点）。

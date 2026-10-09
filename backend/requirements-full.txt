@@ -7,6 +7,9 @@
 #
 # 无 NVIDIA 卡时改用 CPU 版 torch（但相比 onnx CPU 包无提速，不推荐）：
 #   pip install torch torchaudio
+#
+# funasr 不钉版本：取当前最新。已验证可用的版本见 app/engine/README.md §0
+# （本文件只管 torch/CUDA 那条线，funasr 本体由 pip 解析最新稳定版）。
 funasr
 fastapi
 uvicorn[standard]
