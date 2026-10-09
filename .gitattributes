@@ -1,0 +1,26 @@
+# 行尾策略：仓库内一律存 LF，检出到任何平台（含 Windows）也保持 LF。
+#
+# 为什么必须显式写：仓库之前没有 .gitattributes，靠 core.autocrlf=true 自动转换。
+# 那会让每次 checkout 都把 LF 转成 CRLF、每次 commit 再转回 LF，于是：
+#   1. 每个 git 操作都在刷 "LF will be replaced by CRLF" 警告；
+#   2. 工具/合并在 CRLF 工作区上做文本处理时容易把换行符吃掉
+#      （本仓库发生过：backend/app 下 13 个 .py 被压成单行、157 处语法错误）。
+# 钉死成 eol=lf 后，转换环节消失，两类问题一起消除。
+* text=auto eol=lf
+
+# 二进制：一律不做行尾转换 / 文本 diff / 合并
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.wav  binary
+*.onnx binary
+*.pt   binary
+*.pth  binary
+*.bin  binary
+*.zip  binary
+*.001  binary
+*.002  binary
+*.exe  binary
+*.dll  binary
