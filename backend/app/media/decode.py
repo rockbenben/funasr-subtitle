@@ -2,6 +2,10 @@
 
 视频只取音轨。解码前先用 ffprobe 校验：不是受支持的媒体 / 无音轨 -> 立即报错，
 不进入长时间解码。解码中按时长实时上报进度，并有看门狗，避免「卡在解码」。
+
+PCM 用 `_PcmSink` 流式读进按 ffprobe 时长预分配的缓冲区：旧的「攒 list[bytes] 再
+b"".join()"」会让峰值内存变成音频数据的 2 倍（2 小时视频 916MB → 现 475MB），
+详见 engine/README.md §7。
 """
 from __future__ import annotations
 
@@ -10,8 +14,8 @@ import json
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 import numpy as np
 
@@ -29,13 +33,74 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 class DecodeError(RuntimeError):
     """解码/格式相关错误；message 为面向用户的中文说明，detail 放原始技术输出（界面折叠显示）。"""
 
-    def __init__(self, message: str, detail: "Optional[str]" = None) -> None:
+    def __init__(self, message: str, detail: str | None = None) -> None:
         super().__init__(message)
         self.detail = detail
 
 
 class DecodeCancelled(DecodeError):
     """解码被用户取消（与失败区分，便于上层报「已取消」而非「失败」）。"""
+
+
+_READ_CHUNK = 1 << 20  # 1MB：每次从 ffmpeg stdout 取的数据块
+
+
+def _estimate_pcm_bytes(total_ms: int | None) -> int:
+    """按 ffprobe 时长预估 f32le@16k 的字节数（+1s 余量）。"""
+    if not total_ms or total_ms <= 0:
+        return 0
+    samples = int(total_ms * TARGET_SR / 1000) + TARGET_SR
+    return samples * 4
+
+
+class _PcmSink:
+    """把 ffmpeg stdout 的 f32le PCM **流式**读进一块可增长的 numpy 缓冲区。
+
+    为什么不用 `list[bytes]` + `b"".join()`：那会让峰值内存变成音频数据的 2 倍
+    （2 小时视频 ≈ 460MB -> 峰值 ~920MB），长视频很容易把内存顶爆。
+    这里直接读进目标缓冲区，常驻只有 1 份；只有 ffprobe 时长估短时才按倍数扩容，
+    扩容才是唯一的一次性拷贝代价。
+    """
+
+    _MIN_BYTES = _READ_CHUNK  # 时长未知时的起容量
+
+    def __init__(self, capacity_bytes: int = 0) -> None:
+        self._buf = np.empty(max(capacity_bytes, self._MIN_BYTES), dtype=np.uint8)
+        self._mv = memoryview(self._buf)
+        self._filled = 0
+
+    def read_from(self, stream, chunk: int = _READ_CHUNK) -> int:
+        """从二进制流读一块进缓冲区；返回读到的字节数（0 表示 EOF）。
+
+        与 `stream.read(chunk)` 语义一致：阻塞到填满本次窗口或 EOF。
+        窗口恒定上限 `chunk`（不让 readinto 一次吞掉整个缓冲区），
+        这样主线程能按块刷新活动时间、看门狗才能识别 ffmpeg 卡死。
+        """
+        space = min(chunk, len(self._buf) - self._filled)
+        if space <= 0:  # 缓冲区已满才扩容（读不到东西时绝不扩容，避免 EOF 前无谓翻倍）
+            self._grow(chunk)
+            space = min(chunk, len(self._buf) - self._filled)
+        n = stream.readinto(self._mv[self._filled:self._filled + space])
+        if not n:
+            return 0
+        self._filled += n
+        return n
+
+    def _grow(self, need: int) -> None:
+        new = np.empty(max(len(self._buf) * 2, len(self._buf) + need), dtype=np.uint8)
+        new[: self._filled] = self._buf[: self._filled]
+        self._mv.release()
+        self._buf = new
+        self._mv = memoryview(new)
+
+    def to_audio(self) -> np.ndarray:
+        """导出 float32 单声道数组。
+
+        f32le 每样本 4 字节：被杀/截断时尾部可能残留不足 4 字节，截到 4 的整数倍，
+        否则 np.frombuffer/view 会抛错（非 DecodeError）。
+        """
+        usable = (self._filled // 4) * 4
+        return self._buf[:usable].view("<f4").astype(np.float32, copy=False)
 
 
 def _ffprobe_path() -> Path:
@@ -108,7 +173,7 @@ def probe_media(path: str | Path) -> dict:
     return {"duration_ms": total_ms, "has_audio": True}
 
 
-def probe_duration_ms(path: str | Path) -> Optional[int]:
+def probe_duration_ms(path: str | Path) -> int | None:
     """探测媒体时长（毫秒）。失败返回 None（仅用于进度估算，不致命）。"""
     try:
         return probe_media(path).get("duration_ms")
@@ -116,7 +181,7 @@ def probe_duration_ms(path: str | Path) -> Optional[int]:
         return None
 
 
-def _parse_progress_us(line: str) -> Optional[int]:
+def _parse_progress_us(line: str) -> int | None:
     """从 ffmpeg -progress 行解析 out_time_us（已处理的音频时间，微秒）。
 
     只认 out_time_us（现代 ffmpeg 必有），不碰 out_time_ms：后者历史上单位时而是
@@ -132,8 +197,8 @@ def _parse_progress_us(line: str) -> Optional[int]:
 
 def decode_to_16k_mono(
     path: str | Path,
-    progress: Optional[Callable[[float], None]] = None,
-    cancel: "Optional[threading.Event]" = None,
+    progress: Callable[[float], None] | None = None,
+    cancel: threading.Event | None = None,
 ) -> tuple[np.ndarray, int]:
     """解码为 (float32 单声道 -1..1, 16000)。
 
@@ -207,15 +272,13 @@ def decode_to_16k_mono(
     t_dog.start()
 
     try:
-        # 主线程持续读 stdout（PCM），收到数据即刷新活动时间。
-        chunks: list[bytes] = []
+        # 主线程持续把 stdout（PCM）读进预分配缓冲区，收到数据即刷新活动时间。
+        sink = _PcmSink(capacity_bytes=_estimate_pcm_bytes(total_ms))
         assert proc.stdout is not None
         while True:
-            buf = proc.stdout.read(1 << 20)  # 1MB
-            if not buf:
+            if not sink.read_from(proc.stdout):
                 break
             last_active[0] = time.monotonic()
-            chunks.append(buf)
 
         code = proc.wait()
     finally:
@@ -242,11 +305,8 @@ def decode_to_16k_mono(
             detail=f"ffmpeg code {code}" + (f": {msg[:400]}" if msg else ""),
         )
 
-    raw = b"".join(chunks)
-    # f32le：每样本 4 字节。被杀/截断时尾部可能残留不足 4 字节，截到 4 的整数倍，
-    # 否则 np.frombuffer 会抛 ValueError（非 DecodeError）。
-    usable = len(raw) - (len(raw) % 4)
-    audio = np.frombuffer(raw[:usable], dtype="<f4").astype(np.float32, copy=False)
+    # f32le：每样本 4 字节。被杀/截断时尾部可能残留不足 4 字节，to_audio 已截到整数倍。
+    audio = sink.to_audio()
     if audio.size == 0:
         raise DecodeError("解码出来的音频是空的（可能没有有效音轨）")
     if progress:
