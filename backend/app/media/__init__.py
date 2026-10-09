@@ -1,4 +1,4 @@
-"""媒体解码层：任意输入 -> 16kHz 单声道 PCM（§11）。"""
+"""媒体解码层：任意输入 -> 16kHz 单声道 PCM。"""
 from .decode import (
     DecodeCancelled,
     DecodeError,

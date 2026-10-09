@@ -2,8 +2,7 @@
 import json
 
 from app.schemas import Segment
-from app.subtitle import export_segments, to_srt, to_vtt, to_txt, to_json
-
+from app.subtitle import export_segments, to_json, to_srt, to_txt, to_vtt
 
 SEGS = [
     Segment(start_ms=0, end_ms=5890, text="今天天气非常好，好不好？"),

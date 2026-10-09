@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 import threading
-from typing import Callable, Literal, Optional, Protocol
+from collections.abc import Callable
+from typing import Literal, Protocol
 
 import numpy as np
 
@@ -54,8 +55,8 @@ class ASREngine(Protocol):
         wav: np.ndarray,
         sample_rate: int,
         options: JobOptions,
-        progress: Optional[ProgressCallback] = None,
-        cancel: Optional[threading.Event] = None,
+        progress: ProgressCallback | None = None,
+        cancel: threading.Event | None = None,
     ) -> list[Segment]:
         """对 16k 单声道 PCM（float32, -1..1）转写，返回带时间戳的 segments。
 

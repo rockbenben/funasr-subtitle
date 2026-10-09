@@ -1,6 +1,6 @@
 """torch-stub 安装时机的回归测试（修复「No module named 'torch.multiprocessing'」）。
 
-背景（§17 / engine/README.md）：
+背景（见 engine/README.md）：
 - modelscope 的 get_logger() 用 `importlib.util.find_spec('torch')` 探测 torch；
   一旦发现 torch（哪怕是我们注入的 stub），就会 `from modelscope.utils.torch_utils
   import is_master`，而 torch_utils 顶部 `import torch.multiprocessing as mp` —— stub 是

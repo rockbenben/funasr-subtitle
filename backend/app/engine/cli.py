@@ -1,4 +1,4 @@
-"""命令行入口（§15 M1）：喂一个音频/视频，打印 segments / 导出字幕。
+"""命令行入口：喂一个音频/视频，打印 segments / 导出字幕。
 
 用法：
     python -m app.engine.cli INPUT [--lang auto] [--model <id>] [--format srt|vtt|txt|json] [-o out]

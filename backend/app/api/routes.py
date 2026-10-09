@@ -1,12 +1,10 @@
 """REST + WebSocket 路由（§7）。"""
 from __future__ import annotations
 
-import asyncio
 import shutil
 import threading
 import uuid
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, File, Form, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
@@ -21,7 +19,7 @@ from ..subtitle import EXPORT_FORMATS, export_segments
 router = APIRouter(prefix="/api")
 
 
-def _err(code: str, message: str, status: int = 400, detail: Optional[str] = None) -> JSONResponse:
+def _err(code: str, message: str, status: int = 400, detail: str | None = None) -> JSONResponse:
     body = {"code": code, "message": message}
     if detail:
         body["detail"] = detail
@@ -83,6 +81,8 @@ async def download_model(model_id: str, request: Request):
 
 
 # ---- jobs ----
+# File()/Form() 写在参数默认值里是 FastAPI 的规定写法（依赖注入靠读签名），
+# 不能改成在函数体内取值——那样 FastAPI 就识别不出这是表单字段了。
 @router.post("/jobs")
 async def create_job(
     request: Request,

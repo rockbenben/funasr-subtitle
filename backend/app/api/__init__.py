@@ -1,1 +1,1 @@
-"""REST + WebSocket 路由（§7）。"""
+"""REST + WebSocket 路由。"""

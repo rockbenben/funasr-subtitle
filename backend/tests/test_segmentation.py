@@ -78,7 +78,6 @@ def test_split_long_cjk_latin_mix_no_oversized_line():
     # CJK 前缀 + 无空格长拉丁串：不应整体留成一条远超宽度的行
     s = "中" * 5 + "abcdefghijklmnopqrstuvwxyz0123" + "文" * 5
     pieces = split_sentences(s, max_chars=20)
-    from app.subtitle.segmentation import _visible_len
     # 至少切成 2 段，且不是「单段全塞」
     assert len(pieces) >= 2
     # 拉丁长词本身不拆，但 CJK 边界要利用上，首段应是纯 CJK 前缀

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Optional
 
 import numpy as np
 
@@ -26,9 +25,9 @@ from ..subtitle import (
     strip_terminal_punct,
 )
 from ..subtitle.segmentation import _TERMINALS
+from .base import EngineOptions, ProgressCallback
 
 _CJK_RE = re.compile(r"[一-鿿぀-ヿ가-힯]")
-from .base import EngineOptions, ProgressCallback
 
 _SPECIAL = re.compile(r"<\|[^|>]*\|>")
 _VALID_LANGS = {"auto", "zh", "yue", "en", "ja", "ko"}
@@ -38,7 +37,7 @@ def _merge_to_terminal(raw: list[list]) -> list[list]:
     """合并相邻子句直到句末标点，得到自然语句（start=首句起，end=末句止）。
     换说话人时先收尾，不跨说话人合并。"""
     out: list[list] = []
-    cur: Optional[list] = None
+    cur: list | None = None
     for st, en, tx, spk in raw:
         if cur is not None and cur[3] != spk:  # 换人 -> 先收尾
             out.append(cur)
@@ -108,8 +107,8 @@ class FunasrFullEngine:
         wav: np.ndarray,
         sample_rate: int,
         options: JobOptions,
-        progress: Optional[ProgressCallback] = None,
-        cancel: "Optional[object]" = None,
+        progress: ProgressCallback | None = None,
+        cancel: object | None = None,
     ) -> list[Segment]:
         if not self._loaded:
             self.load()

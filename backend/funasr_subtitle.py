@@ -30,7 +30,7 @@ def _main() -> None:
         if sys.stdout is None:
             sys.stdout = fh
         fh.write("=== funasr-subtitle starting ===\n")
-    except Exception:
+    except Exception:  # noqa: BLE001  # windowed 兜底：日志都开不了就彻底放弃，不能让程序起不来
         fh = None
 
     try:
@@ -41,7 +41,7 @@ def _main() -> None:
         try:
             with open(log, "a", encoding="utf-8") as f:
                 f.write(tb + "\n")
-        except Exception:
+        except Exception:  # noqa: BLE001  # 连日志都写不了，已无处可报：吞掉，让原始异常继续抛
             pass
         raise
 

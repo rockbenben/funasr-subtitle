@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec（onedir，windowed）— §12 / §17.7。
+"""PyInstaller spec（onedir，windowed）。
 
-§17.7 实测要点：
+打包期实测要点（见 engine/README.md）：
 - collect_all('funasr_onnx') 在无 torch 时**无法 import 而枚举失败**。
   解决：在 spec 里先收集 modelscope（无 stub），再注入 torch-stub，再收集 funasr_onnx /
   scipy / sklearn —— 与运行时的安全顺序一致。
@@ -82,7 +82,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     # 无 runtime hook：torch-stub 必须在 modelscope 初始化「之后」由 _ensure_funasr 安装，
-    # 启动期注入会让 modelscope 撞 torch.multiprocessing 崩（见上方 docstring §17.7）。
+    # 启动期注入会让 modelscope 撞 torch.multiprocessing 崩（见上方 docstring）。
     runtime_hooks=[],
     excludes=["torch", "funasr", "tkinter", "matplotlib", "tensorflow"],
     noarchive=False,

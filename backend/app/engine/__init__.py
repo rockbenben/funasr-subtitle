@@ -6,8 +6,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
-from typing import Optional
 
 from ..config import NUM_THREADS, models_dir
 from ..models import DEFAULT_MODEL_ID
@@ -26,7 +24,7 @@ def backend() -> str:
     try:
         from .. import _build  # 构建期生成，未提交
         return str(getattr(_build, "BACKEND", "onnx")).strip().lower()
-    except Exception:
+    except Exception:  # noqa: BLE001  # _build.py 不存在（开发态）是正常路径，回退 onnx
         return "onnx"
 
 
@@ -37,7 +35,7 @@ def compute_label() -> str:
             import torch
             if torch.cuda.is_available():
                 return "GPU · CUDA"
-        except Exception:
+        except Exception:  # noqa: BLE001  # onnx 包根本没装 torch，查不到就当 CPU
             pass
     return "CPU"
 
@@ -45,11 +43,11 @@ def compute_label() -> str:
 def build_engine(
     model_id: str = "",
     *,
-    models_root: Optional[str] = None,
+    models_root: str | None = None,
     use_gpu: bool = False,
     num_threads: int = 0,
     diarization: bool = False,
-) -> "ASREngine":
+) -> ASREngine:
     """按后端构造引擎实例（onnx -> FunasrEngine；full -> FunasrFullEngine）。
 
     num_threads 未显式指定（<=0）时用 config.NUM_THREADS（env FUNASR_SUBTITLE_NUM_THREADS）。

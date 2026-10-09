@@ -4,7 +4,7 @@ Root cause（实测）：英文路径原本剥离 SenseVoice 自带标点、改�
 而 zh 模型会在错误位置插句号（把一句切成几段）。修复：原生标点优先，仅当原生无句末
 标点时才退回 ct-punc。纯逻辑，无需加载模型。
 """
-from app.engine.funasr_engine import _latin_punct, _normalize_latin_punct, _has_terminal
+from app.engine.funasr_engine import _has_terminal, _latin_punct, _normalize_latin_punct
 
 
 def test_latin_prefers_native_punct_over_ctpunc():

@@ -243,7 +243,11 @@ def segment_timed(
         # 若下一片是标点，则不在 CJK 字处断（让标点跟在本行末，避免标点跑到下一行行首）。
         nxt_head = nxt.lstrip()[:1] if nxt else ""
         next_is_punct = bool(nxt_head) and nxt_head in (_SOFT + _TERMINALS)
-        boundary = (bool(last) and last in _SOFT) or next_starts_space or (bool(_CJK.match(last)) and not next_is_punct)
+        boundary = (
+            (bool(last) and last in _SOFT)
+            or next_starts_space
+            or (bool(_CJK.match(last)) and not next_is_punct)
+        )
         too_long = max_chars > 0 and vis >= max_chars and boundary
         # 单条时长超上限也在安全边界断（专业规范 ≤7s）
         over_dur = buf_start is not None and (ms - buf_start) >= MAX_CUE_MS and boundary
@@ -308,7 +312,7 @@ def segment_span(
 
     segs: list[Segment] = []
     acc = 0
-    for p, w in zip(pieces, weights):
+    for p, w in zip(pieces, weights, strict=True):  # 同源派生，长度必然一致
         s = start_ms + round(span * acc / total)
         acc += w
         e = start_ms + round(span * acc / total)

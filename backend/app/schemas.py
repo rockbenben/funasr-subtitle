@@ -5,16 +5,18 @@ JobStatus 同时充当管线 stage 名（§7 WS progress.stage）。
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from .config import DEFAULT_MAX_CHARS
 
 
-class JobStatus(str, Enum):
+# 保持 (str, Enum) 而不是 StrEnum：StrEnum 会把 str() 变成取值本身，
+# 而这里的 JobStatus 会经 job.model_dump() 序列化成 WS/REST 载荷，语义不能变。
+class JobStatus(str, Enum):  # noqa: UP042
     queued = "queued"
     decoding = "decoding"
     vad = "vad"
@@ -33,7 +35,7 @@ class Segment(BaseModel):
     start_ms: int
     end_ms: int
     text: str
-    speaker: Optional[str] = None  # diarization 开启时存在，如 "spk0"
+    speaker: str | None = None  # diarization 开启时存在，如 "spk0"
 
 
 Punctuation = Literal["auto", "on", "off"]
@@ -57,7 +59,7 @@ class JobError(BaseModel):
     code: str
     message: str
     # 原始技术细节（ffmpeg / 异常）：界面折叠进「查看详情」，message 只放人话。
-    detail: Optional[str] = None
+    detail: str | None = None
 
 
 class Job(BaseModel):
@@ -67,9 +69,9 @@ class Job(BaseModel):
     percent: float = 0.0  # 0..100
     options: JobOptions = Field(default_factory=JobOptions)
     segments: list[Segment] = Field(default_factory=list)
-    error: Optional[JobError] = None
+    error: JobError | None = None
     created_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
 
 

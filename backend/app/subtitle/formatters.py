@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Iterable
+from collections.abc import Iterable
 
 from ..schemas import Segment
 
@@ -26,7 +26,7 @@ def _clamp(ms: int) -> int:
 
 def _fmt_ts(ms: int, sep: str) -> str:
     """毫秒 -> HH:MM:SS<sep>mmm。SRT 用 ',' VTT 用 '.'。"""
-    ms = _clamp(int(round(ms)))
+    ms = _clamp(ms)  # 调用方一律传 Segment.start_ms/end_ms（pydantic 已保证是 int）
     h, ms = divmod(ms, 3_600_000)
     m, ms = divmod(ms, 60_000)
     s, ms = divmod(ms, 1_000)

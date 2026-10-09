@@ -18,13 +18,12 @@ import re
 import sys
 import types
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
-from ..models import ModelManager, PUNC_MODEL, VAD_MODEL, get_model
-from ..schemas import JobOptions, Segment
 from ..config import PUNC_CHUNK
+from ..models import PUNC_MODEL, VAD_MODEL, ModelManager, get_model
+from ..schemas import JobOptions, Segment
 from ..subtitle import enforce_monotonic, segment_span, segment_timed, strip_terminal_punct
 from ..subtitle.segmentation import _STRIP_TERMINALS
 from .base import EngineOptions, ProgressCallback
@@ -39,19 +38,19 @@ def _ensure_funasr():
     """按 §17 的安全顺序导入 funasr_onnx（避免 torch-stub 撞 modelscope/scipy）。"""
     global _funasr_imported
     if _funasr_imported:
-        import funasr_onnx  # noqa: F401
+        import funasr_onnx
         return funasr_onnx
 
     # 1) 让 modelscope 在「无 torch」时完成 logger 初始化（它用 find_spec('torch')）
     try:
         import modelscope.hub.snapshot_download  # noqa: F401
-    except Exception:
+    except Exception:  # noqa: BLE001  # 预热导入：失败无所谓，后面真用时再报错
         pass
     # 2) 科学栈在 import 期会探测 torch（scipy array_api_compat），必须先 torch-free 导入
     try:
-        import scipy.signal  # noqa: F401
         import librosa  # noqa: F401
-    except Exception:
+        import scipy.signal  # noqa: F401
+    except Exception:  # noqa: BLE001  # 同上：缺包时让后续 import 自己抛出更准确的错
         pass
     # 3) 安装「足够完整」的 torch-stub，挡住 import / duck-typing 探测
     if "torch" not in sys.modules:
@@ -61,7 +60,7 @@ def _ensure_funasr():
         stub.Tensor = type("Tensor", (), {})
         sys.modules["torch"] = stub
     # 4) 导入 funasr_onnx
-    import funasr_onnx  # noqa: F401
+    import funasr_onnx
     _funasr_imported = True
     return funasr_onnx
 
@@ -71,7 +70,7 @@ def directml_available() -> bool:
     try:
         import onnxruntime as ort
         return "DmlExecutionProvider" in ort.get_available_providers()
-    except Exception:
+    except Exception:  # noqa: BLE001  # onnxruntime 缺失/加载失败 -> 探测不到就是没 GPU
         return False
 
 
@@ -95,7 +94,7 @@ def _patch_directml(funasr_onnx, device_id: int = 0) -> bool:
         try:
             if sess_options is not None:
                 sess_options.enable_mem_pattern = False
-        except Exception:
+        except Exception:  # noqa: BLE001  # 该 EP 不认这个属性就跳过，不影响建 session
             pass
         return Orig(model_file, sess_options=sess_options,
                     providers=[dml_ep, "CPUExecutionProvider"], **kw)
@@ -235,7 +234,7 @@ class FunasrEngine:
 
     SAMPLE_RATE = 16_000
 
-    def __init__(self, opts: EngineOptions, manager: Optional[ModelManager] = None) -> None:
+    def __init__(self, opts: EngineOptions, manager: ModelManager | None = None) -> None:
         self.opts = opts
         self.manager = manager or ModelManager(Path(opts.models_root))
         self._vad = None
@@ -276,8 +275,9 @@ class FunasrEngine:
             self._asr = funasr_onnx.ContextualParaformer(
                 asr_dir, quantize=True, device_id=device_id, intra_op_num_threads=threads
             )
-            # funasr-onnx 0.4.1 的 ContextualParaformer.__init__ 漏设 language，
+            # funasr-onnx 的 ContextualParaformer.__init__ 漏设 language，
             # __call__ 会读它来选后处理；中文设任意非 "en-bpe" 值即可。
+            # 上游修好后这行可以删（见 engine/README.md §6）。
             self._asr.language = "zh"
         else:  # sensevoice
             self._asr = funasr_onnx.SenseVoiceSmall(
@@ -297,8 +297,8 @@ class FunasrEngine:
         wav: np.ndarray,
         sample_rate: int,
         options: JobOptions,
-        progress: Optional[ProgressCallback] = None,
-        cancel: "Optional[object]" = None,
+        progress: ProgressCallback | None = None,
+        cancel: object | None = None,
     ) -> list[Segment]:
         if not self._loaded:
             self.load()
@@ -405,7 +405,7 @@ class FunasrEngine:
                     parts.append(self._punc_once(chunk))
                 i = end
             return " ".join(parts)
-        except Exception:
+        except Exception:  # noqa: BLE001  # 标点失败/下载失败不致命，保留原文
             return text  # 标点失败/下载失败不致命，保留原文
 
     def _punc_once(self, text: str) -> str:
