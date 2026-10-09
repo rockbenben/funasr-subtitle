@@ -53,6 +53,15 @@ Copy-Item -Recurse -Force $distSrc $distDst
 
 Write-Host "==> [3/7] Ensure deps + bake backend marker" -ForegroundColor Cyan
 if (-not (Test-Path $Py)) { throw "venv missing: $Py  (full variant needs backend\.venv-full, see requirements-full.txt)" }
+# Preflight: the inference stack lives in the [onnx] extra now, and build.ps1 never
+# installs it -- it freezes whatever venv you point it at. Without this check a venv
+# created as `pip install -e backend` would silently ship a package that cannot transcribe.
+if ($Variant -eq "onnx") {
+    & $Py -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('funasr_onnx') else 1)"
+    if ($LASTEXITCODE -ne 0) {
+        throw "funasr_onnx not found in $Py -- create the build venv with: pip install -e `"backend[onnx]`" (see README)"
+    }
+}
 & $Py -m pip install --quiet pyinstaller
 # tray deps (system-tray icon); optional extra in pyproject, but the build must bundle them
 & $Py -m pip install --quiet "pystray>=0.19" "pillow>=10"
@@ -108,9 +117,78 @@ if (Test-Path $readmeTpl) { Copy-Item -Force $readmeTpl (Join-Path $AppDir "READ
 Write-Host "==> [7/7] Zip" -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 if (Test-Path $Zip) { Remove-Item -Force $Zip }
-Compress-Archive -Path $AppDir -DestinationPath $Zip -CompressionLevel Optimal
+
+# Compress-Archive on a multi-GB payload is extremely slow (it buffers per-entry and
+# is known to take tens of minutes). .NET ZipFile streams and is much faster with
+# lower peak memory. includeBaseDirectory=$true keeps the previous layout: the zip
+# contains a top-level funasr-subtitle/ folder.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::CreateFromDirectory(
+    $AppDir, $Zip, [System.IO.Compression.CompressionLevel]::Optimal, $true)
+
 # 清理构建期烘焙的后端标记，避免开发态(uvicorn)误用 full 后端
 Remove-Item (Join-Path $Backend "app\_build.py") -ErrorAction SilentlyContinue
 
-$mb = [math]::Round((Get-Item $Zip).Length / 1MB, 1)
-Write-Host "Done [$Variant]: $Zip ($mb MB)" -ForegroundColor Green
+$zipSize = (Get-Item $Zip).Length
+$mb = [math]::Round($zipSize / 1MB, 1)
+Write-Host "    zip: $mb MB" -ForegroundColor Gray
+
+# GitHub rejects release assets larger than 2GB, so the full/CUDA package must ship as
+# volumes plus a merge script. This used to be a manual step; keeping it in the build
+# makes releases reproducible and stops the documented `copy /b` step from referring to
+# a merge-cuda-parts.bat that nobody has.
+$PartSize = [long]1900MB
+if ($zipSize -gt $PartSize) {
+    Write-Host "    > 2GB -> splitting into $([math]::Round($PartSize / 1MB))MB volumes" -ForegroundColor Yellow
+    $in = [System.IO.File]::OpenRead($Zip)
+    try {
+        $idx = 1
+        $remaining = $in.Length
+        $buf = New-Object byte[] (4MB)
+        while ($remaining -gt 0) {
+            $take = [long][math]::Min($PartSize, $remaining)
+            $partPath = "{0}.{1:D3}" -f $Zip, $idx
+            $out = [System.IO.File]::Create($partPath)
+            try {
+                $left = $take
+                while ($left -gt 0) {
+                    $want = [int][math]::Min([long]$buf.Length, $left)
+                    $n = $in.Read($buf, 0, $want)
+                    if ($n -le 0) { break }
+                    $out.Write($buf, 0, $n)
+                    $left -= $n
+                }
+            } finally { $out.Dispose() }
+            Write-Host ("      part {0}: {1:N0} MB" -f $idx, ((Get-Item $partPath).Length / 1MB))
+            $remaining -= $take
+            $idx++
+        }
+        $parts = $idx - 1
+    } finally { $in.Dispose() }
+    Remove-Item -Force $Zip
+
+    # Merge script ships as a release asset NEXT TO the volumes (users need it before
+    # they can extract anything). ASCII-only on purpose, same rule as this .ps1.
+    $zipName = Split-Path $Zip -Leaf
+    $bat = Join-Path $OutDir "merge-cuda-parts.bat"
+    $batBody = @"
+@echo off
+REM Merge $zipName.001 / .002 back into the complete zip.
+REM Runs in this folder; double-click is enough.
+setlocal
+cd /d "%~dp0"
+copy /b "$zipName.001"+"$zipName.002" "$zipName"
+if errorlevel 1 (
+    echo Merge failed.
+    pause
+    exit /b 1
+)
+del "$zipName.001" "$zipName.002"
+echo Done: $zipName
+pause
+"@
+    Set-Content -Path $bat -Encoding ASCII -Value $batBody
+    Write-Host "    volumes: $parts + merge-cuda-parts.bat" -ForegroundColor Green
+} else {
+    Write-Host "Done [$Variant]: $Zip ($mb MB)" -ForegroundColor Green
+}

@@ -1,7 +1,11 @@
-"""引擎集成测试（需已下载模型）。
+"""引擎集成测试（需已下载模型 + ONNX 推理栈）。
 
-仅在默认模型已在缓存时运行；否则跳过（CI 上无模型则不强制下载）。
+两个前提缺一不可：
+- 默认模型已在缓存（否则跳过，CI 上无模型则不强制下载）；
+- **funasr_onnx 可导入**——推理栈在 `[onnx]` extra 里，只装了 `[dev]` 的人没有它。
+  这里必须一起判，否则「模型已缓存但没装推理栈」会变成一堆 ImportError 而不是干净跳过。
 """
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -13,10 +17,11 @@ EN_FIXTURE = Path(__file__).parent / "fixtures" / "sample_en_runon.wav"
 
 _mgr = ModelManager()
 _have_models = _mgr.is_downloaded(DEFAULT_MODEL_ID)
+_have_stack = importlib.util.find_spec("funasr_onnx") is not None
 
 pytestmark = pytest.mark.skipif(
-    not (_have_models and FIXTURE.exists()),
-    reason="默认模型未下载或缺测试音频，跳过集成测试",
+    not (_have_stack and _have_models and FIXTURE.exists()),
+    reason="缺 funasr_onnx([onnx] extra) / 默认模型未下载 / 缺测试音频，跳过集成测试",
 )
 
 

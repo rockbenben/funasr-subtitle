@@ -1,8 +1,10 @@
 [project]
 name = "funasr-subtitle"
-version = "0.1.1"
+version = "0.2.0"
 description = "本地、离线、Windows 的 FunASR 字幕生成工具"
 requires-python = ">=3.11,<3.12"
+# 只放「起服务」必需的轻依赖。ONNX 推理栈（几百 MB）拆到下面的 [onnx] extra，
+# 这样只想跑测试 / 看前端的人不必装它（CI 也不装）。
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
@@ -11,15 +13,17 @@ dependencies = [
     "platformdirs>=4.2",
     "numpy>=1.26",
     "soundfile>=0.12",
-    "funasr-onnx",
-    # Windows: DirectML 版同时提供 CPU 与 DmlExecutionProvider（全显卡加速，§10/M8）
-    "onnxruntime-directml>=1.17",
-    "modelscope>=1.13",
 ]
 
 [project.optional-dependencies]
+# ONNX 推理栈（纯 CPU）：funasr-onnx 会顺带装上纯 CPU 版 onnxruntime。
+# 前端已按实测结论隐藏「显卡加速」开关（DirectML 对量化模型反而慢 ~2.8x，见
+# app/engine/README.md），所以这里**不**提供 onnxruntime-directml：
+# 它和 funasr-onnx 依赖的纯 CPU 版 onnxruntime 提供同名包，会互相覆盖，
+# 单靠 pip 解析无法保证 DirectML 胜出。想手动试 DirectML 见 README「开发」。
+onnx = ["funasr-onnx", "modelscope>=1.13"]
 tray = ["pystray>=0.19", "pillow>=10"]
-dev = ["pytest>=8", "httpx>=0.27"]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6"]
 package = ["pyinstaller>=6.5"]
 
 [project.scripts]
@@ -36,3 +40,29 @@ packages = ["app"]
 # 只收集 tests/，别去扫 PyInstaller 产物（dist/dist-full 里也有一堆 test_*.py）
 testpaths = ["tests"]
 norecursedirs = ["dist", "dist-full", "build", "build-full", ".venv", ".venv-full", "frontend_dist"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "BLE", "RUF"]
+ignore = [
+    # 中文全角标点（，。：、「」）是本项目的既定文风，不是「易混淆字符」误报。
+    "RUF001", "RUF002", "RUF003",
+]
+# ANN 系列不强制：回调 / Protocol 桩函数补注解收益低、噪声大。
+# 声明为 external 后，代码里已有的 `# noqa: ANN001` 不会被 RUF100 判成多余指令。
+external = ["ANN"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI 的依赖注入靠**读函数签名**，File()/Form()/Depends() 必须写在参数默认值里
+# （见 app/api/routes.py:create_job）。告诉 bugbear 这些调用是「不可变」的，B008 就不会误报。
+extend-immutable-calls = [
+    "fastapi.Body", "fastapi.Cookie", "fastapi.Depends", "fastapi.File",
+    "fastapi.Form", "fastapi.Header", "fastapi.Path", "fastapi.Query",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试里 assert 是正当用法（pytest.raises 之外的显式断言、无声分支的自检）。
+"tests/*" = ["B011"]
