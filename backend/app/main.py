@@ -7,9 +7,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ctypes
+import http.client
+import json
 import os
 import socket
+import sys
 import threading
+import time
 import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -103,8 +108,70 @@ app = create_app()
 
 # ---- 便携启动器（frozen funasr-subtitle.exe 入口）----
 
+_INSTANCE_MUTEX_NAME = r"Local\funasr-subtitle-instance"
+_instance_lock_handle: int | None = None
+
+
+def _acquire_instance_lock(name: str = _INSTANCE_MUTEX_NAME) -> bool:
+    """Windows 命名互斥锁：只有拿到锁的进程可以启动服务。
+
+    非 Windows 不做限制（本项目发布目标是 Windows，CI 只在 Linux 上导入模块）。
+    """
+    global _instance_lock_handle
+    if sys.platform != "win32":
+        return True
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel32.CreateMutexW
+    create.restype = ctypes.c_void_p
+    create.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+    close = kernel32.CloseHandle
+    close.argtypes = [ctypes.c_void_p]
+    close.restype = ctypes.c_bool
+    handle = create(None, False, name)
+    if not handle:
+        return True
+    if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+        close(ctypes.c_void_p(handle))
+        return False
+    _instance_lock_handle = handle
+    return True
+
+
+def _running_instance_url(preferred: int = DEFAULT_PORT) -> str | None:
+    """双击第二次时找到已在跑的本应用，直接打开页面，而不是再起一个服务。"""
+    for port in range(preferred, min(preferred + 50, 65536)):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.05)
+            if s.connect_ex(("127.0.0.1", port)) != 0:
+                continue
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=0.5)
+            try:
+                conn.request("GET", "/api/health")
+                response = conn.getresponse()
+                payload = json.loads(response.read()) if response.status == 200 else None
+            finally:
+                conn.close()
+        except Exception:  # noqa: BLE001  端口可能是别的服务，或不是 HTTP
+            continue
+        if isinstance(payload, dict) and payload.get("app") == "funasr-subtitle":
+            return f"http://127.0.0.1:{port}"
+    return None
+
+
+def _wait_for_running_instance(timeout: float = 30.0) -> str | None:
+    """第二个进程等先启动的实例开始监听，然后打开它的页面。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        url = _running_instance_url()
+        if url:
+            return url
+        time.sleep(0.25)
+    return None
+
+
 def _find_free_port(preferred: int = DEFAULT_PORT) -> int:
-    for port in range(preferred, preferred + 50):
+    for port in range(preferred, min(preferred + 50, 65536)):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
                 s.bind(("127.0.0.1", port))
@@ -139,11 +206,22 @@ def _start_tray(url: str, shutdown) -> None:  # noqa: ANN001
     icon = pystray.Icon("funasr-subtitle", img, "funasr-subtitle",
                         menu=pystray.Menu(
                             pystray.MenuItem("打开 funasr-subtitle", _open, default=True),
-                            pystray.MenuItem("退出", _quit)))
+                            pystray.MenuItem("退出（会清除字幕）", _quit)))
     threading.Thread(target=icon.run, daemon=True).start()
 
 
 def run() -> None:
+    if not _acquire_instance_lock():
+        existing = _wait_for_running_instance()
+        if existing:
+            webbrowser.open(existing)
+        return
+
+    existing = _running_instance_url()
+    if existing:
+        webbrowser.open(existing)
+        return
+
     import uvicorn
 
     port = _find_free_port()

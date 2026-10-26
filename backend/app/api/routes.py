@@ -1,10 +1,12 @@
 """REST + WebSocket 路由（§7）。"""
 from __future__ import annotations
 
+import re
 import shutil
 import threading
 import uuid
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
@@ -26,10 +28,21 @@ def _err(code: str, message: str, status: int = 400, detail: str | None = None) 
     return JSONResponse(status_code=status, content={"error": body})
 
 
+_ASCII_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _content_disposition(stem: str, ext: str) -> str:
+    """HTTP 头只能放 latin-1；中文名放 RFC 5987 的 filename*，再给个 ASCII 回退。"""
+    safe_stem = _ASCII_FILENAME.sub("_", stem).strip("._") or "subtitle"
+    filename = f"{stem or 'subtitle'}.{ext}"
+    quoted = quote(filename, safe="")
+    return f'attachment; filename="{safe_stem}.{ext}"; filename*=UTF-8\'\'{quoted}'
+
+
 # ---- health ----
 @router.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "version": __version__}
+    return {"status": "ok", "app": "funasr-subtitle", "version": __version__}
 
 
 # ---- models ----
@@ -151,7 +164,7 @@ async def export_job(job_id: str, request: Request, format: str = "srt"):
     body = export_segments(job.segments, fmt)
     mime, ext = EXPORT_FORMATS[fmt]
     stem = Path(job.filename).stem or "subtitle"
-    headers = {"Content-Disposition": f'attachment; filename="{stem}.{ext}"'}
+    headers = {"Content-Disposition": _content_disposition(stem, ext)}
     return Response(content=body, media_type=mime, headers=headers)
 
 
