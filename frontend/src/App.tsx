@@ -30,6 +30,7 @@ import {
   createJob,
   downloadModel,
   exportUrl,
+  getJob,
   getModels,
   shutdown,
   subscribeJob,
@@ -51,6 +52,24 @@ import { STUDIO } from "./theme";
 const { Text } = Typography;
 const EXPORT_FORMATS: ExportFormat[] = ["srt", "vtt", "txt", "json"];
 const TRANSLATOR_URL = "https://tools.newzone.top/zh/subtitle-translator";
+const LAST_JOB_KEY = "funasr-subtitle.last-job";
+
+function storedJobId(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_JOB_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function rememberJob(id: string | null) {
+  try {
+    if (id) window.localStorage.setItem(LAST_JOB_KEY, id);
+    else window.localStorage.removeItem(LAST_JOB_KEY);
+  } catch {
+    // 隐私模式禁用存储时，刷新恢复不可用；不影响正常转写。
+  }
+}
 // 接受范围尽量大：MIME 通配 + 一长串显式扩展名（很多容器浏览器不会自动归类成 audio/video，
 // 如 .ts/.mka/.opus/.amr）。后端用 ffmpeg/ffprobe 探测，只要有音轨就能转。
 const ACCEPT_MEDIA = [
@@ -73,6 +92,10 @@ function formatTimestamp(ms: number): string {
   const ms3 = totalMs % 1000;
   const pad = (n: number, w = 2) => String(n).padStart(w, "0");
   return `${pad(h)}:${pad(m)}:${pad(s)}.${pad(ms3, 3)}`;
+}
+
+function stageOf(job: Job): Stage | null {
+  return job.status === "queued" || job.status === "done" || job.status === "error" ? null : job.status;
 }
 
 // 卡标题统一「大写拉丁 · 中文」：拉丁靠字距撑开，中文段单独收字距，否则被拆成散字。
@@ -108,12 +131,14 @@ function ModelDownloadPanel({
   const [downloading, setDownloading] = useState(false);
   const [percent, setPercent] = useState(0);
   const [detail, setDetail] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WsHandle | null>(null);
   useEffect(() => () => wsRef.current?.close(), []);
 
   const start = useCallback(async () => {
     setPercent(0);
     setDetail("");
+    setError(null);
     setDownloading(true);
     wsRef.current?.close();
     wsRef.current = subscribeModelDownload(model.id, {
@@ -124,24 +149,25 @@ function ModelDownloadPanel({
         } else if (ev.type === "done") {
           setPercent(100);
           setDownloading(false);
+          setError(null);
           wsRef.current?.close();
           wsRef.current = null;
           message.success("模型已就绪");
           onDownloaded();
         } else if (ev.type === "error") {
-          message.error("下载失败，点重试");
+          setError("下载失败：首次下载模型需要联网，请检查网络后点「下载模型」重试。");
           setDownloading(false);
         }
       },
       onError: () => {
-        message.error("连不上后台了，下载中断");
+        setError("连不上后台了，下载中断。请确认程序还在运行，再点「下载模型」重试。");
         setDownloading(false);
       },
     });
     try {
       await downloadModel(model.id);
     } catch (e) {
-      message.error(e instanceof SubtitleApiError ? e.message : "下载没发出去，重试一下");
+      setError(e instanceof SubtitleApiError ? e.message : "下载没发出去，请再点「下载模型」重试。");
       setDownloading(false);
       wsRef.current?.close();
       wsRef.current = null;
@@ -153,8 +179,8 @@ function ModelDownloadPanel({
       <SectionLabel en="FIRST RUN">{caption}</SectionLabel>
       <Flex justify="space-between" align="center" gap={16} wrap>
         <Text type="secondary">
-          第一次要用，需要先下模型 <Text strong style={{ color: STUDIO.text }}>{model.name}</Text>
-          （约 {model.size_mb.toFixed(0)} MB）。下完就彻底离线，不再联网。
+          第一次要用，需要先联网下载模型 <Text strong style={{ color: STUDIO.text }}>{model.name}</Text>
+          （约 {model.size_mb.toFixed(0)} MB）。下完就彻底离线。
         </Text>
         <Button color="primary" variant="solid" loading={downloading} onClick={start}>
           {downloading ? "正在下载…" : "下载模型"}
@@ -166,15 +192,39 @@ function ModelDownloadPanel({
           {detail && <Text type="secondary" className="mono" style={{ fontSize: 12 }}>{detail}</Text>}
         </div>
       )}
+      {error && (
+        <Alert type="error" showIcon message={error} style={{ marginTop: 14 }} />
+      )}
     </Card>
   );
 }
 
 // ----- 结果面板 -----
-function ResultsPanel({ job }: { job: Job }) {
+function ResultsPanel({ job, restored }: { job: Job; restored: boolean }) {
   const { message } = AntApp.useApp();
   const [copied, setCopied] = useState(false);
+  const [showFade, setShowFade] = useState(false);
+  const listRef = useRef<HTMLDivElement | null>(null);
   const fullText = useMemo(() => job.segments.map((s) => s.text).join("\n"), [job.segments]);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const update = () => {
+      setShowFade(
+        el.scrollHeight > el.clientHeight + 1 &&
+        el.scrollTop + el.clientHeight < el.scrollHeight - 1,
+      );
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      observer.disconnect();
+    };
+  }, [job.id, job.segments.length]);
   const copyAll = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(fullText);
@@ -209,12 +259,18 @@ function ResultsPanel({ job }: { job: Job }) {
           </Button>
         </Space>
       </Flex>
+      {restored && (
+        <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 6 }}>
+          已恢复上次的字幕结果（{job.filename}）。原文件不会保留，重新转写请重新选择文件。
+        </Text>
+      )}
       <Text type="secondary" style={{ fontSize: 12 }}>
         想翻成双语字幕？把 .srt 导入{" "}
         <a href={TRANSLATOR_URL} target="_blank" rel="noreferrer">字幕翻译器</a>
       </Text>
       <div
-        className="scroll-fade"
+        ref={listRef}
+        className={showFade ? "scroll-fade" : undefined}
         style={{ marginTop: 12, maxHeight: 420, overflow: "auto", paddingRight: 6 }}
       >
         {job.segments.length === 0 ? (
@@ -260,6 +316,7 @@ export default function App() {
   const useGpu = false;
 
   const [job, setJob] = useState<Job | null>(null);
+  const [restored, setRestored] = useState(false);
   const [stage, setStage] = useState<Stage | null>(null);
   const [percent, setPercent] = useState(0);
   const [running, setRunning] = useState(false);
@@ -269,6 +326,9 @@ export default function App() {
   // 任务开始时选的模型还没下载：后端会先在 job 线程里下模型，界面必须说清进度为什么不动。
   const [fetchingModel, setFetchingModel] = useState(false);
   const jobWsRef = useRef<WsHandle | null>(null);
+  const jobPollRef = useRef<number | null>(null);
+  const pollTokenRef = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadModels = useCallback(async () => {
     setModelsError(null);
@@ -286,6 +346,116 @@ export default function App() {
   useEffect(() => void loadModels(), [loadModels]);
   useEffect(() => () => jobWsRef.current?.close(), []);
 
+  const stopPolling = useCallback(() => {
+    pollTokenRef.current += 1;
+    if (jobPollRef.current != null) {
+      window.clearInterval(jobPollRef.current);
+      jobPollRef.current = null;
+    }
+  }, []);
+
+  const applyJobOptions = useCallback((saved: Job) => {
+    setModelId(saved.options.model_id || "");
+    setLanguage(saved.options.language as Language);
+    setDiarization(saved.options.diarization);
+    setHotwords(saved.options.hotwords);
+    setMaxChars(saved.options.max_chars ?? 30);
+    setPunctuation(saved.options.punctuation ?? "auto");
+  }, []);
+
+  // 刷新/关页后后端任务仍在跑；恢复进度时用 2 秒轮询，避免重连 WS 的复杂度。
+  const pollJob = useCallback((jobId: string) => {
+    stopPolling();
+    const token = pollTokenRef.current;
+    jobPollRef.current = window.setInterval(() => {
+      void (async () => {
+        try {
+          const current = await getJob(jobId);
+          if (token !== pollTokenRef.current) return;
+          setJob(current);
+          if (current.status === "done") {
+            stopPolling();
+            setRestored(true);
+            setPercent(100);
+            setRunning(false);
+            setFetchingModel(false);
+            rememberJob(current.id);
+          } else if (current.status === "error") {
+            stopPolling();
+            setRunning(false);
+            setFetchingModel(false);
+            rememberJob(null);
+            if (current.error?.code === "cancelled") {
+              setJob(null);
+              setStage(null);
+              setPercent(0);
+              setCancelled(true);
+            } else {
+              setJobError(current.error?.message || "转写没完成");
+              setJobDetail(current.error?.detail ?? null);
+            }
+          } else {
+            setStage(stageOf(current));
+            setPercent(current.percent);
+          }
+        } catch {
+          if (token !== pollTokenRef.current) return;
+          stopPolling();
+          setRunning(false);
+          setJobError((prev) => prev ?? "连不上后台了，转写中断");
+        }
+      })();
+    }, 2000);
+  }, [stopPolling]);
+
+  // 刷新/关标签页后，后端任务仍在内存里；找回上一次完成或仍在跑的任务。
+  useEffect(() => {
+    const id = storedJobId();
+    if (!id) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const saved = await getJob(id);
+        if (cancelled) return;
+        applyJobOptions(saved);
+        if (saved.status === "done") {
+          setJob(saved);
+          setRestored(true);
+          setPercent(100);
+          return;
+        }
+        if (saved.status === "error") {
+          rememberJob(null);
+          return;
+        }
+        setJob(saved);
+        setRestored(true);
+        setPercent(saved.percent);
+        setStage(stageOf(saved));
+        setRunning(true);
+        setFetchingModel(false);
+        pollJob(saved.id);
+      } catch {
+        if (!cancelled) rememberJob(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      stopPolling();
+    };
+  }, [applyJobOptions, pollJob, stopPolling]);
+
+  // 转写中刷新/关页会丢掉界面进度（后台还在跑），先拦一下。
+  useEffect(() => {
+    if (!running) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [running]);
+
   const defaultModel = useMemo(() => models.find((m) => m.id === defaultId), [models, defaultId]);
   const needsDownload = !!defaultModel && !defaultModel.downloaded;
   const currentModel = useMemo(() => models.find((m) => m.id === modelId), [models, modelId]);
@@ -294,6 +464,7 @@ export default function App() {
   const modelNotDownloaded = !!currentModel && !currentModel.downloaded;
 
   const clearRunState = useCallback(() => {
+    stopPolling();
     setJob(null);
     setJobError(null);
     setJobDetail(null);
@@ -301,17 +472,24 @@ export default function App() {
     setPercent(0);
     setCancelled(false);
     setFetchingModel(false);
-  }, []);
+  }, [stopPolling]);
 
   const pickFile = (f: File | null) => {
+    if (running) return;
     setFile(f);
     clearRunState();
+    setRestored(false);
+    rememberJob(null);
   };
+
+  const openFilePicker = useCallback(() => fileInputRef.current?.click(), []);
 
   const start = useCallback(async () => {
     if (!file || running) return;
     setRunning(true);
     clearRunState();
+    setRestored(false);
+    rememberJob(null);
     setFetchingModel(modelNotDownloaded);
     try {
       const { job_id } = await createJob(file, {
@@ -323,6 +501,7 @@ export default function App() {
         maxChars,
         punctuation,
       });
+      rememberJob(job_id);
       jobWsRef.current?.close();
       let settled = false;  // 是否已收到终态，用于区分「正常关闭」与「意外断开」
       jobWsRef.current = subscribeJob(job_id, {
@@ -333,6 +512,8 @@ export default function App() {
           } else if (ev.type === "done") {
             settled = true;
             setJob(ev.job);
+            setRestored(false);
+            rememberJob(ev.job.id);
             setPercent(100);
             setRunning(false);
             setFetchingModel(false);
@@ -342,6 +523,7 @@ export default function App() {
             settled = true;
             setRunning(false);
             setFetchingModel(false);
+            rememberJob(null);
             // 用户主动取消不是失败：后端用 code=cancelled 报，这里按取消收口。
             if (ev.code === "cancelled") {
               setJob(null);
@@ -382,6 +564,7 @@ export default function App() {
       } else {
         setJobError("任务没发出去，重试一下");
       }
+      rememberJob(null);
       setRunning(false);
       setFetchingModel(false);
     }
@@ -394,6 +577,7 @@ export default function App() {
     jobWsRef.current = null;
     setRunning(false);
     clearRunState();
+    rememberJob(null);
     setCancelled(true);  // 屏上的「已取消转写」回执就是反馈，不再叠一条 toast
     try {
       await cancelJob(job.id);
@@ -419,10 +603,22 @@ export default function App() {
         : "开始转写";
 
   // 结果卡排在设置之前：跑完第一眼就能看到字幕（否则整块落在折叠下方）。
-  const results = isDone && job ? <ResultsPanel job={job} /> : null;
+  const results = isDone && job ? <ResultsPanel job={job} restored={restored} /> : null;
 
   return (
     <div style={{ position: "relative", zIndex: 1, minHeight: "100%", padding: "32px 20px 80px" }}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={ACCEPT_MEDIA}
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const input = e.currentTarget;
+          const picked = input.files?.[0] ?? null;
+          input.value = "";
+          if (picked) pickFile(picked);
+        }}
+      />
       <div style={{ maxWidth: 860, margin: "0 auto" }}>
         {/* 走带条 / Transport bar */}
         <Flex justify="space-between" align="center" className="rise" style={{ marginBottom: 26 }}>
@@ -439,7 +635,9 @@ export default function App() {
             </Tag>
             <Popconfirm
               title="要停止后台服务吗？"
-              description="正在跑的任务会中断，页面可以关掉。"
+              description={isDone
+                ? "停止服务会清除当前字幕，请先导出。正在跑的任务会中断，页面可以关掉。"
+                : "正在跑的任务会中断，页面可以关掉。"}
               okText="停止服务"
               cancelText="取消"
               okButtonProps={{ danger: true, variant: "outlined" }}
@@ -474,6 +672,7 @@ export default function App() {
               accept={ACCEPT_MEDIA}
               multiple={false}
               showUploadList={false}
+              disabled={running}
               beforeUpload={(f) => {
                 pickFile(f as unknown as File);
                 return false;
@@ -498,7 +697,9 @@ export default function App() {
 
           {/* 设置 */}
           <Card className="rise d2" variant="outlined">
-            <SectionLabel en="SETTINGS">{isDone ? "设置 · 可改参数后重跑" : "设置"}</SectionLabel>
+            <SectionLabel en="SETTINGS">
+              {isDone ? (file ? "设置 · 可改参数后重跑" : "设置 · 重新选择文件后可重跑") : "设置"}
+            </SectionLabel>
             <Flex vertical gap={18}>
               <Flex gap={28} wrap align="flex-start">
                 <Flex vertical gap={8} style={{ minWidth: 0, maxWidth: "100%" }}>
@@ -600,8 +801,10 @@ export default function App() {
                     {startLabel}
                   </Button>
                   {running && <Button variant="outlined" onClick={onCancel}>取消</Button>}
-                  {!running && file && (
-                    <Button variant="text" onClick={() => pickFile(null)}>换个文件</Button>
+                  {!running && (file || isDone || restored) && (
+                    <Button variant="text" onClick={openFilePicker}>
+                      {file ? "换个文件" : "选择文件"}
+                    </Button>
                   )}
                 </Flex>
                 {!file && (
@@ -615,6 +818,11 @@ export default function App() {
           {showProgress && (
             <Card className="rise" variant="outlined">
               <SectionLabel en="PROGRESS">{stage ? STAGE_LABELS[stage] : "等待开始"}</SectionLabel>
+              {job?.filename && (
+                <Text type="secondary" className="mono" style={{ fontSize: 12, display: "block", marginBottom: 12 }}>
+                  {job.filename}
+                </Text>
+              )}
               <Steps
                 size="small"
                 current={stageIndex}
@@ -640,7 +848,7 @@ export default function App() {
               type="info"
               showIcon
               message="已取消转写"
-              description="文件还在，随时可以重新开始。"
+              description={file ? "文件还在，随时可以重新开始。" : "原文件不会保留，重新转写请重新选择文件。"}
               className="rise"
             />
           )}
@@ -651,7 +859,7 @@ export default function App() {
               showIcon
               message="转写没完成"
               description={
-                <Flex vertical gap={6}>
+                <Flex vertical gap={8}>
                   <span>{jobError}</span>
                   {jobDetail && (
                     <details>
@@ -661,9 +869,12 @@ export default function App() {
                       </pre>
                     </details>
                   )}
+                  <Space size={6} wrap>
+                    {file && <Button size="small" icon={<ReloadOutlined />} onClick={start}>重新转写</Button>}
+                    <Button size="small" onClick={openFilePicker}>换个文件</Button>
+                  </Space>
                 </Flex>
               }
-              action={<Button size="small" icon={<ReloadOutlined />} onClick={start}>重新转写</Button>}
               className="rise"
             />
           )}

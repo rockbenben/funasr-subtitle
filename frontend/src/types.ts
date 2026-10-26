@@ -33,7 +33,7 @@ export interface Job {
     punctuation?: "auto" | "on" | "off";
   };
   segments: Segment[];
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; detail?: string };
   created_at: string;
 }
 
