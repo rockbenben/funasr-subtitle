@@ -2,7 +2,7 @@
 
 > 本文件记录 funasr-onnx / ONNX 各模块在本机的**实测结论**（torch-free 的 onnx 后端），
 > 供后续模式复用。测量环境：Windows 11 x64、Python 3.11、**未安装 torch**。
-> 依赖一律取当前最新（`pip install -e "backend[onnx]"`），**本文不钉依赖版本号**——
+> 依赖版本下限见 `pyproject.toml`（2026-10 已整体抬高），**本文只记验证过的版本**——
 > 某条结论若确实只对特定版本成立，会在该条里就地注明。
 > ⚠️ 当前默认装的是**纯 CPU 版 onnxruntime**（DirectML 已被移出依赖，见第 6 节）。
 > 第 1 节的 RTF / 准确率结论在纯 CPU 版上同样成立——那些本来就是 CPU 测量；
@@ -14,15 +14,20 @@
 
 | 包 | 组件 | 验证版本 | 验证方式 |
 | --- | --- | --- | --- |
-| CPU / onnx | `funasr-onnx` | **0.4.3** | 全量 67 测试 + SenseVoice/Paraformer/热词版三条真实推理路径 |
+| CPU / onnx | `funasr-onnx` | **0.4.3** | 全量 83 测试（1 skip = DirectML 未装）+ SenseVoice/Paraformer/热词版三条真实推理路径 |
 | CUDA / full | `funasr` | **1.4.16** | RTX 3080 Ti 上 SenseVoice / Paraformer / cam++ 三条真实推理路径 |
+
+2026-10-27 依赖升级后复核过：推理栈本体版本没变（都还是最新），周边包动了——
+onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37.1 → **1.40.2**。
+两条线分别实跑过：onnx 线 numpy 1.26.4，full 线 numpy 2.4.6 + torch 2.5.1+cu121 上跑通 CUDA 推理。
 
 **两处 0.4.1 时代的 workaround 在 0.4.3 上依然必需**（升级后没被上游修掉，也因此不能删）：
 
 - `ContextualParaformer.__init__` 仍然不设 `self.language`，加载后必须手动 `asr.language="zh"`（§6）
 - contextual 仓库仍然只有 `model_eb.onnx`，量化路径要的 `model_eb_quant.onnx` 仍需下载后本地复制（§6）
 
-升 `funasr-onnx` 时注意它声明 `numpy<=1.26.4`，**不要连带升 numpy 2**。
+升 `funasr-onnx` 时注意它声明 `numpy<=1.26.4`，**不要连带升 numpy 2**——这条已写成 `pyproject.toml`
+里 `numpy>=1.26,<2` 的上界，pip 不会再往 onnx 线装 numpy 2。torch 线（`requirements-full.txt`）不受此限。
 
 
 ## 1. SenseVoiceSmall（默认 ASR）

@@ -10,12 +10,15 @@
 #
 # funasr 不钉版本：取当前最新。已验证可用的版本见 app/engine/README.md §0
 # （本文件只管 torch/CUDA 那条线，funasr 本体由 pip 解析最新稳定版）。
+#
+# numpy 这里不设上界：torch 那条线能跑 numpy 2.x；而 pyproject（onnx 线）因为
+# funasr-onnx 要求 numpy<=1.26.4，必须锁在 1.x。两条线的 numpy 不一样，别混装。
 funasr
-fastapi
-uvicorn[standard]
-pydantic>=2
-python-multipart
-platformdirs
-soundfile
+fastapi>=0.162
+uvicorn[standard]>=0.54
+pydantic>=2.14
+python-multipart>=0.0.32
+platformdirs>=4.13
+soundfile>=0.14
 numpy
-pyinstaller>=6.5
+pyinstaller>=6.22

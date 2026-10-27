@@ -6,13 +6,16 @@ requires-python = ">=3.11,<3.12"
 # 只放「起服务」必需的轻依赖。ONNX 推理栈（几百 MB）拆到下面的 [onnx] extra，
 # 这样只想跑测试 / 看前端的人不必装它（CI 也不装）。
 dependencies = [
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.29",
-    "pydantic>=2.6",
-    "python-multipart>=0.0.9",
-    "platformdirs>=4.2",
-    "numpy>=1.26",
-    "soundfile>=0.12",
+    "fastapi>=0.162",
+    "uvicorn[standard]>=0.54",
+    "pydantic>=2.14",
+    "python-multipart>=0.0.32",
+    "platformdirs>=4.13",
+    # numpy 锁在 1.x：推理栈 funasr-onnx 要求 numpy<=1.26.4（numpy 1.x 只出到 Python 3.12，
+    # 它顺带把本项目的 Python 上限也钉在了 3.12）。写死上界后，CI 装到的 numpy
+    # 与便携包实际打包进去的 numpy 一致。torch 版不受此限，见 requirements-full.txt。
+    "numpy>=1.26,<2",
+    "soundfile>=0.14",
 ]
 
 [project.optional-dependencies]
@@ -21,10 +24,10 @@ dependencies = [
 # app/engine/README.md），所以这里**不**提供 onnxruntime-directml：
 # 它和 funasr-onnx 依赖的纯 CPU 版 onnxruntime 提供同名包，会互相覆盖，
 # 单靠 pip 解析无法保证 DirectML 胜出。想手动试 DirectML 见 README「开发」。
-onnx = ["funasr-onnx", "modelscope>=1.13"]
-tray = ["pystray>=0.19", "pillow>=10"]
-dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6"]
-package = ["pyinstaller>=6.5"]
+onnx = ["funasr-onnx>=0.4.3", "modelscope>=1.40"]
+tray = ["pystray>=0.19", "pillow>=13"]
+dev = ["pytest>=9", "httpx>=0.28", "ruff>=0.17"]
+package = ["pyinstaller>=6.22"]
 
 [project.scripts]
 funasr-subtitle-cli = "app.engine.cli:main"
