@@ -67,7 +67,8 @@
 
 > [!IMPORTANT]
 > **CUDA 包超过 GitHub 单文件 2 GB 上限**，所以拆成了两个分卷：下载
-> `…cuda-win-x64.zip.001` 和 `.002` 放同一目录，双击随附的 `merge-cuda-parts.bat`
+> `…cuda-win-x64.zip.001` 和 `.002` 放同一目录，双击随附的
+> `funasr-subtitle-cuda-win-x64-merge.bat`
 > （或运行 `copy /b "…zip.001"+"…zip.002" "…zip"`）合并出完整 zip，再解压。CPU 包无需此步。
 
 ## 🚀 使用

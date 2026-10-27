@@ -136,7 +136,7 @@ Write-Host "    zip: $mb MB" -ForegroundColor Gray
 # GitHub rejects release assets larger than 2GB, so the full/CUDA package must ship as
 # volumes plus a merge script. This used to be a manual step; keeping it in the build
 # makes releases reproducible and stops the documented `copy /b` step from referring to
-# a merge-cuda-parts.bat that nobody has.
+# a merge script that nobody has.
 $PartSize = [long]1900MB
 if ($zipSize -gt $PartSize) {
     Write-Host "    > 2GB -> splitting into $([math]::Round($PartSize / 1MB))MB volumes" -ForegroundColor Yellow
@@ -169,8 +169,12 @@ if ($zipSize -gt $PartSize) {
 
     # Merge script ships as a release asset NEXT TO the volumes (users need it before
     # they can extract anything). ASCII-only on purpose, same rule as this .ps1.
+    # Name it after the zip (funasr-subtitle-cuda-win-x64-merge.bat): release assets are
+    # listed alphabetically, so keeping the same prefix puts the script next to the
+    # .001/.002 volumes it has to sit next to, instead of hiding under "m".
     $zipName = Split-Path $Zip -Leaf
-    $bat = Join-Path $OutDir "merge-cuda-parts.bat"
+    $batName = [System.IO.Path]::GetFileNameWithoutExtension($zipName) + "-merge.bat"
+    $bat = Join-Path $OutDir $batName
     $batBody = @"
 @echo off
 REM Merge $zipName.001 / .002 back into the complete zip.
@@ -188,7 +192,7 @@ echo Done: $zipName
 pause
 "@
     Set-Content -Path $bat -Encoding ASCII -Value $batBody
-    Write-Host "    volumes: $parts + merge-cuda-parts.bat" -ForegroundColor Green
+    Write-Host "    volumes: $parts + $batName" -ForegroundColor Green
 } else {
     Write-Host "Done [$Variant]: $Zip ($mb MB)" -ForegroundColor Green
 }
