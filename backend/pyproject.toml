@@ -1,6 +1,6 @@
 [project]
 name = "funasr-subtitle"
-version = "0.2.2"
+version = "0.3.0"
 description = "本地、离线、Windows 的 FunASR 字幕生成工具"
 requires-python = ">=3.11,<3.12"
 # 只放「起服务」必需的轻依赖。ONNX 推理栈（几百 MB）拆到下面的 [onnx] extra，
