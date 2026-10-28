@@ -1,12 +1,20 @@
-# Engine — onnx 后端实测验证结论
+# Engine — 推理后端实测验证结论
 
-> 本文件记录 funasr-onnx / ONNX 各模块在本机的**实测结论**（torch-free 的 onnx 后端），
-> 供后续模式复用。测量环境：Windows 11 x64、Python 3.11、**未安装 torch**。
+> 本文件记录两条推理后端在本机的**实测结论**：
+> - **onnx 后端**（funasr-onnx / ONNX，纯 CPU，CPU 便携包走这条）——第 1–6 节的 RTF /
+>   准确率 / DirectML 数据都基于它；
+> - **full 后端**（完整 funasr + torch / CUDA，CUDA 便携包走这条）——文中标「完整版」的部分。
+>
+> 测量环境：Windows 11 x64、Python 3.11。onnx 线的环境**未安装 torch**（这是它能纯 CPU
+> 运行的前提）；full 线的环境装了 torch + CUDA。
 > 依赖版本下限见 `pyproject.toml`（2026-10 已整体抬高），**本文只记验证过的版本**——
 > 某条结论若确实只对特定版本成立，会在该条里就地注明。
 > ⚠️ 当前默认装的是**纯 CPU 版 onnxruntime**（DirectML 已被移出依赖，见第 6 节）。
 > 第 1 节的 RTF / 准确率结论在纯 CPU 版上同样成立——那些本来就是 CPU 测量；
 > 只有第 6 节的 DirectML 数据需要额外手动装 `onnxruntime-directml`。
+>
+> 📌 文中的「§N」编号指作者手头的**原始设计稿**章节（那份稿子不在本仓库里）。仓库内可查的
+> 结论以本文为准；编号对不上时以本文的文字描述为准。
 
 ## 0. 已验证的依赖版本（2026-10）
 
@@ -14,7 +22,7 @@
 
 | 包 | 组件 | 验证版本 | 验证方式 |
 | --- | --- | --- | --- |
-| CPU / onnx | `funasr-onnx` | **0.4.3** | 全量 83 测试（1 skip = DirectML 未装）+ SenseVoice/Paraformer/热词版三条真实推理路径 |
+| CPU / onnx | `funasr-onnx` | **0.4.3** | 全量 99 测试（1 skip = DirectML 未装）+ SenseVoice/Paraformer/热词版三条真实推理路径 |
 | CUDA / full | `funasr` | **1.4.16** | RTX 3080 Ti 上 SenseVoice / Paraformer / cam++ 三条真实推理路径 |
 
 2026-10-27 依赖升级后复核过：推理栈本体版本没变（都还是最新），周边包动了——
@@ -83,10 +91,37 @@ funasr-onnx 必须能 `import torch` 才能 import（`__init__` 会导入 sensev
 
 ## 5. 模型下载
 
-- 用 `modelscope.hub.snapshot_download(repo, cache_dir=%LOCALAPPDATA%\funasr-subtitle\models)`，可达性好，**torch-free**。
-- 用 `ignore_file_pattern=["*.pt","*.pth",...]` 跳过 PyTorch 权重（SenseVoice pt 仓库 893MB）。
+两条后端**用的不是同一批仓库**：onnx 后端下 onnx 权重（几百 MB），完整版下 pt 权重
+（0.9–2.1 GB）。仓库 id 的对应关系写在 `app/models/registry.py`（`repo` vs `full_repo`）。
+
+- 用 `modelscope.hub.snapshot_download(repo, cache_dir=…, local_dir=<缓存根>\<repo>)`，可达性好，**torch-free**。
+  缓存根默认 `<数据目录>\models`；用户设了 `MODELSCOPE_CACHE` 就跟随它（funasr 也读同一个变量）。
+- **必须显式传 `local_dir`**：modelscope ≥1.38 默认落到
+  `<cache>/models/<owner>--<name>/snapshots/<rev>/`，应用按平铺 `<cache>/<owner>/<name>` 找；
+  不传就会「下载成功但找不到」。读取侧两种布局都认，已按新布局下过的模型不必重下。
+- 完整版（torch）的 pt 模型也预置到同样的平铺目录：funasr 的 `snapshot_download`
+  会把 `<cache>/<owner>/<name>` 当 legacy cache 直接复用，下载面板和引擎不会各存一份。
+- 用 `ignore_file_pattern=["*.pt","*.pth",...]` 跳过 PyTorch 权重（SenseVoice pt 仓库 893MB）
+  —— **仅 onnx 链路**，完整版必须下 pt。
 - 默认链路（SenseVoice）总下载量 ≈ VAD(0.5MB) + SenseVoice-onnx(230MB) + bpe(0.4MB) ≈ **231MB**
   （registry 的 `size_mb` 取整估值 **235MB**，用于 UI 进度显示）。
+  完整版 SenseVoice ≈ ASR(897MB) + VAD(4MB)；Paraformer-zh 还要加 ct-punc(1132MB) ≈ 2.1GB。
+
+### 5.1 两条后端的「模型已就位」判据不同
+
+`/api/models` 的 `downloaded` 与下载面板的完成判定**随当前后端变**：
+
+| 后端 | 判据 | 预置清单 |
+| --- | --- | --- |
+| onnx | 主权重 `model_quant.onnx` + 辅助文件（bpe 词表等）+ 目录内改名产物都在 | ASR(onnx) + VAD(onnx) +（不自带标点时）ct-punc(onnx) |
+| full | 预置清单里每个仓库都含 `model.pt` + `config.yaml` | ASR(pt) + VAD(pt) +（不自带标点时）ct-punc(pt) |
+
+- **cam++ 不在预置清单里**：只有勾了「区分说话人」才用得上，量也不大，让 funasr 在加载
+  引擎时自己按需下载。代价是那一刻没有进度可报。
+- 完整版**不点「下载模型」也能转写**：引擎加载时 funasr 会自己下 pt 权重（走 ModelScope
+  的新布局 `<cache>/models/<owner>--<name>/snapshots/<rev>/`），但没有进度，界面会长时间
+  停在「读音频」。走下载面板预置的好处是**有进度**、且落成平铺布局后 funasr 会直接复用，
+  两边不会各存一份。
 
 ## 6. 实测结论（Paraformer / DirectML / diarization）
 
@@ -118,8 +153,12 @@ funasr-onnx 必须能 `import torch` 才能 import（`__init__` 会导入 sensev
   ② 既然开关已隐藏且实测更慢，没必要默认装它。
   想手动复现本节实验：`pip install --force-reinstall --no-deps onnxruntime-directml`，
   然后确认 `ort.get_available_providers()` 里有 `DmlExecutionProvider`。
-- **diarization（cam++）**：funasr-onnx **至今仍无任何说话人分离类** → onnx 后端降级不支持，
-  本期不支持，前端开关置灰，后端安全忽略。
+- **diarization（cam++）**：两条后端**都支持**，但走的路不同——
+  - **完整版（full）**：`AutoModel(spk_model="cam++")`，实测可用（RTX 3080 Ti，见第 0 节）。
+    只有 Paraformer 系模型能出带 `spk` 的 `sentence_info`，所以 SenseVoice + cam++ 没有意义，
+    面板上的开关只对 Paraformer 系亮。cam++ 模型不在预置下载清单里，勾了才现下（见 5.1）。
+  - **onnx 后端**：funasr-onnx **至今仍无任何说话人分离类** → 降级不支持，
+    前端开关置灰，后端安全忽略。
 
 ## 7. 内存占用（长视频 / 反复切模型）
 

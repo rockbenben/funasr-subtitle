@@ -19,6 +19,7 @@ funasr 在**拿不到模型目录时不会抛错**——`download_model()` 把�
 from __future__ import annotations
 
 from app.models import REGISTRY
+from app.models.registry import ASR_MODELS
 
 HOTWORD_ID = "iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404-onnx"
 SEACO_PT = "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
@@ -40,3 +41,21 @@ def test_hotword_full_model_id():
         f"{spec.full_model!r} 不在 funasr 的 name_maps_ms 里，"
         "funasr 不认这个仓库名，AutoModel 会以「not registered」的形式失败"
     )
+
+
+def test_full_repos_are_downloadable_and_match_aliases():
+    """完整版的下载仓库要和引擎实际用的仓库一致，否则下载面板白下。"""
+    for spec in ASR_MODELS:
+        assert spec.full_repo, f"{spec.id} 缺 full_repo（完整版下载用）"
+        assert spec.full_size_mb > 0, f"{spec.id} 缺 full_size_mb"
+    try:
+        from funasr.download.name_maps_from_hub import name_maps_ms
+    except ImportError:  # CI 只装 [dev]
+        return
+    for spec in ASR_MODELS:
+        if "/" in spec.full_model:  # 已经是仓库 id
+            continue
+        assert name_maps_ms.get(spec.full_model) == spec.full_repo, (
+            f"{spec.id} 的 full_model 别名 {spec.full_model!r} 解析到 "
+            f"{name_maps_ms.get(spec.full_model)!r}，但下载用的是 {spec.full_repo!r}"
+        )

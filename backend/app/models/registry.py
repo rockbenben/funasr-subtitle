@@ -3,6 +3,8 @@
 modelscope 仓库 id 已确认可达且含 .onnx（见 engine/README.md）。
 - VAD / punc 是所有 ASR 模型共享的辅助模块。
 - 面向用户的「模型」目前是 ASR 模型（默认 SenseVoiceSmall）。
+- 每个 ASR 模型有**两套**仓库：onnx（CPU 包用，`repo`）与 pt（完整版用，`full_repo`），
+  体积差一到两个数量级——面板显示的体积按当前后端取，不是固定值。
 """
 from __future__ import annotations
 
@@ -31,6 +33,12 @@ class ModelSpec:
     # 完整 funasr（torch）后端用的模型 id（AutoModel model=...）。
     # 与 onnx repo 不同：完整后端用 pt 模型。空则该模型不支持 full 后端。
     full_model: str = ""
+    # 完整后端下载用的 ModelScope 仓库 id / 体积（MB）。
+    # full_model 允许是 funasr 别名（如 paraformer-zh），下载必须用真实仓库 id。
+    # full_size_mb 只算**这个模型本体**：VAD / ct-punc 是共享辅助模型，
+    # 完整后端的总下载量 = 本体 + VAD + (不自带标点时) ct-punc，见 manager._full_parts。
+    full_repo: str = ""
+    full_size_mb: float = 0.0
 
 
 # ---- ASR（面向用户可选） ----
@@ -44,6 +52,8 @@ SENSEVOICE = ModelSpec(
     builtin_punc=True,
     engine="sensevoice",
     full_model="iic/SenseVoiceSmall",
+    full_repo="iic/SenseVoiceSmall",
+    full_size_mb=897.0,
 )
 PARAFORMER_ZH = ModelSpec(
     id="iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx",
@@ -54,6 +64,9 @@ PARAFORMER_ZH = ModelSpec(
     builtin_punc=False,
     engine="paraformer",
     full_model="paraformer-zh",
+    # funasr 的 paraformer-zh 别名指向 seaco pt 仓库（见上游 name_maps_ms）。
+    full_repo="iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+    full_size_mb=953.0,
 )
 PARAFORMER_ZH_HOTWORD = ModelSpec(
     id="iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404-onnx",
@@ -69,7 +82,16 @@ PARAFORMER_ZH_HOTWORD = ModelSpec(
     # 写错成 seaco-paraformer 时 modelscope 报 "record not found"，而 funasr 会把下载
     # 失败吞掉、拿原始 id 去查注册表，最终抛出误导性的 "model ... is not registered"。
     full_model="iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+    full_repo="iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+    full_size_mb=953.0,
 )
+
+# 完整后端的共享辅助模型（funasr 侧别名 fsmn-vad / ct-punc 指向的 pt 仓库）。
+# 下载时预置到平铺缓存，funasr 的 snapshot_download 会当作 legacy cache 直接复用。
+FULL_VAD_REPO = "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
+FULL_VAD_SIZE_MB = 4.0
+FULL_PUNC_REPO = "iic/punc_ct-transformer_cn-en-common-vocab471067-large"
+FULL_PUNC_SIZE_MB = 1132.0
 
 # ---- 辅助模块（共享，不在用户「模型」下拉里单列） ----
 VAD_MODEL = ModelSpec(

@@ -117,6 +117,12 @@ function FieldLabel({ children, hint }: { children: React.ReactNode; hint?: Reac
   );
 }
 
+// 下载体积按 GB / MB 显示：完整版一个模型就上 GB，统一写 MB 不好读。
+// ⚠️ 进度条下面那行「已下 / 总量」仍是原始 MB（见下方 setDetail），与这里的单位不一致。
+function formatSize(mb: number): string {
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+}
+
 // ----- 模型下载面板（首启，以及「选了还没下载的模型」时复用）-----
 function ModelDownloadPanel({
   model,
@@ -132,14 +138,18 @@ function ModelDownloadPanel({
   const [percent, setPercent] = useState(0);
   const [detail, setDetail] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const wsRef = useRef<WsHandle | null>(null);
+  const settledRef = useRef(false);
   useEffect(() => () => wsRef.current?.close(), []);
 
   const start = useCallback(async () => {
     setPercent(0);
     setDetail("");
     setError(null);
+    setErrorDetail(null);
     setDownloading(true);
+    settledRef.current = false;
     wsRef.current?.close();
     wsRef.current = subscribeModelDownload(model.id, {
       onEvent: (ev) => {
@@ -147,6 +157,7 @@ function ModelDownloadPanel({
           setPercent(ev.percent);
           setDetail(`${ev.downloaded_mb.toFixed(0)} / ${ev.total_mb.toFixed(0)} MB`);
         } else if (ev.type === "done") {
+          settledRef.current = true;
           setPercent(100);
           setDownloading(false);
           setError(null);
@@ -155,13 +166,23 @@ function ModelDownloadPanel({
           message.success("模型已就绪");
           onDownloaded();
         } else if (ev.type === "error") {
+          settledRef.current = true;
           setError("下载失败：首次下载模型需要联网，请检查网络后点「下载模型」重试。");
+          setErrorDetail(ev.detail ?? null);
           setDownloading(false);
         }
       },
       onError: () => {
+        settledRef.current = true;
         setError("连不上后台了，下载中断。请确认程序还在运行，再点「下载模型」重试。");
         setDownloading(false);
+      },
+      onClose: () => {
+        // 没收到终态就断开：别让按钮永远停在「正在下载…」，那看起来像没反应。
+        if (!settledRef.current) {
+          setError("下载连接断开了，请点「下载模型」重试。");
+          setDownloading(false);
+        }
       },
     });
     try {
@@ -180,7 +201,7 @@ function ModelDownloadPanel({
       <Flex justify="space-between" align="center" gap={16} wrap>
         <Text type="secondary">
           第一次要用，需要先联网下载模型 <Text strong style={{ color: STUDIO.text }}>{model.name}</Text>
-          （约 {model.size_mb.toFixed(0)} MB）。下完就彻底离线。
+          （约 {formatSize(model.size_mb)}）。下完就彻底离线。
         </Text>
         <Button color="primary" variant="solid" loading={downloading} onClick={start}>
           {downloading ? "正在下载…" : "下载模型"}
@@ -193,7 +214,22 @@ function ModelDownloadPanel({
         </div>
       )}
       {error && (
-        <Alert type="error" showIcon message={error} style={{ marginTop: 14 }} />
+        <Alert
+          type="error"
+          showIcon
+          message={error}
+          description={
+            errorDetail ? (
+              <details>
+                <summary style={{ cursor: "pointer" }}>查看详情</summary>
+                <pre className="mono" style={{ whiteSpace: "pre-wrap", fontSize: 11.5, margin: "6px 0 0" }}>
+                  {errorDetail}
+                </pre>
+              </details>
+            ) : undefined
+          }
+          style={{ marginTop: 14 }}
+        />
       )}
     </Card>
   );
@@ -313,6 +349,8 @@ export default function App() {
   const [punctuation, setPunctuation] = useState<"auto" | "on" | "off">("auto");
   const [compute, setCompute] = useState("CPU");
   // DirectML 实测对量化模型比 CPU 慢，已隐藏开关；后端仍保留 use_gpu 能力（默认 false）。
+  // 注意：这个开关**只对 onnx 后端**有意义——完整版由后端自己看 torch.cuda.is_available()
+  // 决定用不用 CUDA，不看这个值（有卡就用，前端这个开关关着也不影响）。
   const useGpu = false;
 
   const [job, setJob] = useState<Job | null>(null);
@@ -323,7 +361,8 @@ export default function App() {
   const [jobError, setJobError] = useState<string | null>(null);
   const [jobDetail, setJobDetail] = useState<string | null>(null);
   const [cancelled, setCancelled] = useState(false);
-  // 任务开始时选的模型还没下载：后端会先在 job 线程里下模型，界面必须说清进度为什么不动。
+  // 任务开始时选的模型还没下载：后端会先在 job 线程里下模型（onnx 后端是引擎加载时
+  // 同步下载，完整版是 funasr 懒下载 pt 权重），界面必须说清进度为什么不动。
   const [fetchingModel, setFetchingModel] = useState(false);
   const jobWsRef = useRef<WsHandle | null>(null);
   const jobPollRef = useRef<number | null>(null);
@@ -380,6 +419,7 @@ export default function App() {
             setRunning(false);
             setFetchingModel(false);
             rememberJob(current.id);
+            void loadModels();  // 完整版是任务里懒下载的，跑完刷新「已下载」状态（onnx 后端不需要）
           } else if (current.status === "error") {
             stopPolling();
             setRunning(false);
@@ -406,7 +446,7 @@ export default function App() {
         }
       })();
     }, 2000);
-  }, [stopPolling]);
+  }, [stopPolling, loadModels]);
 
   // 刷新/关标签页后，后端任务仍在内存里；找回上一次完成或仍在跑的任务。
   useEffect(() => {
@@ -517,6 +557,7 @@ export default function App() {
             setPercent(100);
             setRunning(false);
             setFetchingModel(false);
+            void loadModels();  // 完整版是任务里懒下载的，跑完刷新「已下载」状态（onnx 后端不需要）
             jobWsRef.current?.close();
             jobWsRef.current = null;
           } else if (ev.type === "error") {
@@ -568,7 +609,7 @@ export default function App() {
       setRunning(false);
       setFetchingModel(false);
     }
-  }, [file, running, modelId, language, diarization, diarAvailable, hotwords, maxChars, punctuation, modelNotDownloaded, clearRunState]);
+  }, [file, running, modelId, language, diarization, diarAvailable, hotwords, maxChars, punctuation, modelNotDownloaded, clearRunState, loadModels]);
 
   // 取消：不管后端什么时候确认，界面立刻从「在跑」回到「可重来」，不留半截进度卡。
   const onCancel = useCallback(async () => {
@@ -836,7 +877,7 @@ export default function App() {
               />
               {fetchingModel && (
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  第一次用这个模型，正在先下载（约 {currentModel?.size_mb.toFixed(0) ?? "若干"} MB），
+                  第一次用这个模型，正在先下载（约 {currentModel ? formatSize(currentModel.size_mb) : "若干"}），
                   进度可能长时间停在「读音频」。
                 </Text>
               )}

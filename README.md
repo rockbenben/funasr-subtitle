@@ -50,11 +50,13 @@
 - ✂️ **专业字幕切分** — 按标点 / 停顿切句；每行「显示宽度」可调（中日韩字符算 1、拉丁/数字算 0.5，默认 30 ≈ 中文 30 字 / 英文 ~60 字，上限 100，`0` = 不限制）+ 单条 ≤ 7s，断点取 句末 > 子句 > 词边界，不拆英文词；最终 cue 严格单调不重叠。
 - 🔤 **标点模式可选** — `自动`（默认：中文等自带标点的语言加句末标点；**英文按停顿切、不强加**——英文模型标点常不准，错位句号会把一句切碎）/ `加标点` / `不加标点`。
 - 📝 **多格式导出** — SRT / VTT / TXT / JSON，或一键「复制全文」。
-- 👥 **说话人分离（可选）** — 用 cam++ 标注每段说话人，导出含 `[spk0]`/`[spk1]`…；**仅完整版 + Paraformer 模型**可用（完整版有 N 卡自动用 GPU、无卡回退 CPU）；onnx 版与 SenseVoice 不支持。
+- 👥 **说话人分离（可选）** — 用 cam++ 标注每段说话人，导出含 `[spk0]`/`[spk1]`…；**仅完整版 + Paraformer 模型**可用（完整版有 N 卡自动用 GPU、无卡回退 CPU）；onnx 版与 SenseVoice 不支持。cam++ 不在首启下载清单里，勾上这个开关后首次转写时才现下（量不大，但第一次会多等一会儿）。
 
 ## 📦 下载
 
-前往 **[Releases](https://github.com/rockbenben/funasr-subtitle/releases/latest)** 下载 Windows x64 便携包，解压 → 双击 `funasr-subtitle.exe` → 浏览器里用。两份功能 / 界面一致，只差推理后端：
+**不确定选哪个？下 `funasr-subtitle-win-x64.zip`（CPU 包，约 340 MB），绝大多数人够用。**
+
+前往 **[Releases](https://github.com/rockbenben/funasr-subtitle/releases/latest)** 下载 Windows x64 便携包，解压 → 双击 `funasr-subtitle.exe` → 浏览器里用。两份**界面与操作完全一样**，差的是推理后端（连模型都是两套：CPU 包用 onnx 权重，完整版用 pt 权重）：
 
 | 包                                   | 大小    | 后端                 | 适用                                                                          |
 | ------------------------------------ | ------- | -------------------- | ----------------------------------------------------------------------------- |
@@ -62,7 +64,8 @@
 | **funasr-subtitle-cuda-win-x64.zip** | ~2.6 GB | 完整 funasr · torch  | 有 N 卡自动 GPU 加速、无卡回退 CPU；要说话人分离 / Paraformer 高精度 / 大模型 |
 
 > [!NOTE]
-> 首次运行需联网下载模型（CPU 包默认 SenseVoice ≈ 235 MB），之后离线可用。
+> 首次运行需联网下载模型（CPU 包默认 SenseVoice ≈ 235 MB；完整版用 pt 模型，
+> SenseVoice ≈ 0.9 GB，Paraformer-zh ≈ 2.1 GB），之后离线可用。
 > 程序未签名，SmartScreen 提示时点「更多信息」→「仍要运行」。
 
 > [!IMPORTANT]
@@ -73,11 +76,21 @@
 
 ## 🚀 使用
 
-1. 双击 `funasr-subtitle.exe`，浏览器自动打开。
-2. 首次按页面提示下载默认模型（之后离线）。
-3. 拖入音频 / 视频 → 选语言 / 模型（可填热词、调每行最多几个字、选标点模式）→ 点「开始转写」。
-4. 导出 SRT / VTT / TXT / JSON 或「复制全文」；`.srt` 可直接导入 [subtitle-translator](https://tools.newzone.top/zh/subtitle-translator) 翻译。
-5. 退出：页面右上角「停止服务」或右下角托盘图标。
+**解压 → 双击 `funasr-subtitle.exe` → 把音视频拖进页面 → 点「开始转写」。**
+
+1. **第一次打开：先下模型。** 页面会提示「先下模型」，点「下载模型」，等提示「模型已就绪」；之后完全离线。默认模型 CPU 包约 235 MB（完整版约 0.9–2.1 GB）。
+2. **转写：拖文件，点开始。** 把 mp4 / mkv / mp3 / wav 拖进页面 → 点「开始转写」。语言默认「自动」，模型用默认的就行；热词 / 每行字数 / 标点这些不填也能用。
+3. **导出：点 `.srt`。** 结果出来后点「.srt」下载，文件会存到浏览器的下载目录，名字和源文件一样（`a.mp4` → `a.srt`）。也可以选 `.vtt` / `.txt` / `.json`，或「复制全文」。
+4. **退出：** 点页面右上角「停止服务」，或右下角托盘图标。退出会清掉当前字幕，**先导出再退**。
+
+> **「已下载」按后端各算各的**：CPU 包认 onnx 权重，完整版认 pt 权重（ASR + VAD，
+> 不自带标点的模型再加 ct-punc）。同一台机器换另一个包跑，两边的「已下载」状态互不相干。
+> 万一没先点「下载模型」就开始转写，后端也会在任务里现下模型——这时进度条会长时间停在
+> 「读音频」，属正常，等模型下完就跑起来了。
+
+> 想用命令行：按 [开发](#️-开发) 装好依赖后，`cd backend`，运行
+> `.\.venv\Scripts\python -m app.engine.cli "C:\video\a.mp4" -o "C:\video\a.srt"`。
+> （完整版的依赖装在 `backend\.venv-full` 里，把上面路径换成它即可。）
 
 ## ⚙️ 工作原理
 
@@ -92,11 +105,15 @@
 
 - **VAD** 圈出「哪里在说话」，**ASR** 出文字，**切句** 决定字幕断行——三件事各司其职。
 - **时间戳**：SenseVoice 由 CTC 帧位置推出逐 token 时间（onnx 包）；Paraformer 在 full 包给句级时间戳、在 onnx 包按 VAD 段比例分配；粒度到句级，足够做字幕。
+- 上图是 **CPU 包（onnx）** 的管线。完整版把 VAD+ASR+标点合成 funasr 的一次 `generate()`，
+  内部多步自己走，界面看到的阶段是一样的。
+- 两套后端**连模型都不是同一批**（onnx 权重 vs pt 权重），体积差一到两个数量级。
 - 各模型 / 后端的实测结论详见 [`backend/app/engine/README.md`](./backend/app/engine/README.md)。
 
 ## ⚠️ 已知局限
 
 - **英文默认不强加句末标点** — SenseVoice / ct-punc 的英文句末标点常不准，错位的句号会把一句切碎。因此「标点」默认 `自动` 时**英文走「按停顿」**：去掉句末 `.?!`（逗号 / 小数保留），只按语音停顿 + 行宽在词边界切，断行干净但没有完整书面句号。需要书面句标点可把「标点」切到 `加标点`（用 SenseVoice 自带标点，已处理 `e.g.`/`U.S.`/`Inc.` 缩写）。**中文 / 日文自带标点较准，默认自动加，不受影响。**
+- **完整版首次要下 GB 级模型** — pt 权重 SenseVoice ≈ 0.9 GB、Paraformer-zh ≈ 2.1 GB（含 ct-punc），第一次转写前就得下完；磁盘和网速都要留够。
 - **时间戳为句级** — 足够做字幕，但不是逐词对齐，不适合逐词高亮 / 卡拉 OK 式效果。
 - **未签名** — Windows SmartScreen 会拦，需手动「更多信息」→「仍要运行」。
 
@@ -116,6 +133,14 @@ cd backend; ..\backend\.venv\Scripts\python -m uvicorn app.main:app --reload --p
 # 前端
 cd frontend; npm ci; npm run dev
 ```
+
+> **开发完整版（full）**：另建一个 venv 装 torch + `backend\requirements-full.txt`
+> （见该文件头部注释），然后用 `FUNASR_SUBTITLE_BACKEND=full` 起后端。
+> 默认（不设这个变量）走 onnx 后端——构建期烘焙的值只影响打包产物，开发态永远是 onnx。
+
+> **模型缓存位置**：默认 `%LOCALAPPDATA%\funasr-subtitle\models`。设了 `MODELSCOPE_CACHE`
+> 就改用它（funasr 也读同一个变量），两边不会各存一份。测试会显式清掉这个变量，
+> 保证跑在临时目录里，不碰你真实的模型缓存。
 
 > **关于 DirectML 显卡加速**：`onnxruntime-directml` 和 `funasr-onnx` 依赖的纯 CPU 版
 > `onnxruntime` 提供同名包、会互相覆盖，pip 保证不了 DirectML 胜出；而且实测 DirectML
@@ -177,7 +202,8 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Variant full
 | `FUNASR_SUBTITLE_PUNC_CHUNK`    | 110                              | ct-punc 长文本分块长度                             |
 | `FUNASR_SUBTITLE_MAX_JOBS`      | 50                               | 内存中保留的已完成任务数上限（超出丢弃最旧的）     |
 | `FUNASR_SUBTITLE_ENGINE_CACHE_SIZE` | 2                            | 常驻引擎缓存上限（LRU，超出淘汰最久未用的）       |
-| `FUNASR_SUBTITLE_DATA_DIR`      | `%LOCALAPPDATA%\funasr-subtitle` | 模型 / 任务数据目录                                |
+| `FUNASR_SUBTITLE_DATA_DIR`      | `%LOCALAPPDATA%\funasr-subtitle` | 任务数据目录；模型默认在它的 `models/` 下          |
+| `MODELSCOPE_CACHE`              | 未设                             | 模型缓存根；设了则模型跟随它（funasr 也读这个变量） |
 
 > 内存护栏：解码直接把 PCM 流式读进预分配缓冲区（不产生 2× 拷贝）；已完成任务与
 > 引擎会话都有上限，长视频 / 反复切模型也不会把内存顶爆。实测数据见

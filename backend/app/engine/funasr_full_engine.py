@@ -1,10 +1,14 @@
-"""完整 funasr（torch）后端的 ASREngine 实现（"full" 构建变体用）。
+"""完整 funasr（torch）后端的 ASREngine 实现（"full" 构建变体 / CUDA 便携包用）。
 
 与 funasr-onnx 后端的区别：
 - 用 `funasr.AutoModel` 跑 VAD + ASR + (punc) 一体管线，device 可选 cuda（真显卡加速）。
 - 输出解析优先用 `sentence_info`（句级 start/end/text/spk，Paraformer 等带时间戳模型给得到），
   否则按标点切句 + 比例时间兜底（SenseVoice 无时间戳时）。
-- 模型下载走 modelscope，缓存指到 %LOCALAPPDATA%\\funasr-subtitle\\models（与 onnx 后端同目录）。
+- 模型下载走 modelscope，缓存根 = config.model_cache_dir()（默认
+  %LOCALAPPDATA%\\funasr-subtitle\\models，与 onnx 后端共用一份；用户设了
+  MODELSCOPE_CACHE 就跟随它）。
+- 完整版用的是 **pt 权重**（SenseVoice ≈ 0.9GB；Paraformer 还要带 ct-punc ≈ 2.1GB），
+  和 onnx 后端那批仓库不是一回事——对应关系见 models/registry.py 的 full_repo。
 
 注意：本文件只在装了 torch + funasr 的 "full" 环境里被 import（build_engine 按 backend 分派）。
 """
@@ -15,8 +19,8 @@ import re
 
 import numpy as np
 
-from ..config import models_dir
-from ..models import get_model
+from ..config import model_cache_dir
+from ..models import ModelManager, get_model
 from ..schemas import JobOptions, Segment
 from ..subtitle import (
     enforce_monotonic,
@@ -107,7 +111,9 @@ class FunasrFullEngine:
     def load(self) -> None:
         if self._loaded:
             return
-        os.environ.setdefault("MODELSCOPE_CACHE", str(models_dir()))
+        # 必须与 ModelManager 的下载目录一致：两者都对着 model_cache_dir()（用户设了
+        # MODELSCOPE_CACHE 就跟随它），否则界面「下载模型」和 funasr 会各用一套缓存。
+        os.environ["MODELSCOPE_CACHE"] = self.opts.models_root or str(model_cache_dir())
         import torch
         from funasr import AutoModel
 
@@ -129,8 +135,13 @@ class FunasrFullEngine:
         if not self._builtin_punc:
             kwargs["punc_model"] = "ct-punc"  # SenseVoice 自带标点则不加
             if self._diar:
-                kwargs["spk_model"] = "cam++"  # cam++ 说话人分离
-        self._model = AutoModel(**kwargs)
+                # cam++ 说话人分离：不在下载面板的预置清单里，由 funasr 在这里按需拉取
+                # （体积不大，且只有勾了这个开关才用得上）。
+                kwargs["spk_model"] = "cam++"
+        # 与「下载模型」共用按 model_id 的锁：面板还在下 pt 模型时，这里等它下完再加载，
+        # 避免两个 snapshot_download 并发写同一个平铺目录。
+        with ModelManager.download_lock(self.opts.model_id):
+            self._model = AutoModel(**kwargs)
         self._loaded = True
 
     def transcribe(

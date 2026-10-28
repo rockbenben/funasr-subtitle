@@ -46,18 +46,38 @@ async def health() -> dict:
 
 
 # ---- models ----
+def _full_backend() -> bool:
+    """当前跑的是不是完整版（torch）后端。面板的体积/就位判定都随它变。"""
+    from ..engine import backend
+    return backend() == "full"
+
+
+def _model_ready(mgr: ModelManager, model_id: str) -> bool:
+    """当前后端真正能用的判断：onnx 看 onnx 仓库，full 看 pt 模型（ASR+VAD+punc）。
+
+    完整版的「就位」= 预置清单里的 pt 权重全在（见 ModelManager._full_parts）；
+    cam++ 不在清单里，勾了说话人分离才由 funasr 在加载引擎时补下。
+    """
+    if _full_backend():
+        return mgr.full_downloaded(model_id)
+    return mgr.is_downloaded(model_id)
+
+
 @router.get("/models")
 async def list_models(request: Request) -> dict:
-    from ..engine import backend, compute_label
+    from ..engine import compute_label
     mgr: ModelManager = request.app.state.models
-    # 说话人分离仅完整版(full) + Paraformer 系（能出 sentence_info）支持
-    diar_backend = backend() == "full"
+    full = _full_backend()
     out = []
     for spec in ASR_MODELS:
         out.append({
             "id": spec.id, "name": spec.name, "task": spec.task,
-            "size_mb": spec.size_mb, "downloaded": mgr.is_downloaded(spec.id),
-            "diarization": diar_backend and spec.engine in ("paraformer", "contextual"),
+            # 体积与「已就位」都按后端取：onnx 包是 onnx 仓库的量级（几百 MB），
+            # 完整版是 pt 权重（0.9–2.1 GB），拿 onnx 的数字充数会骗人。
+            "size_mb": mgr.full_total_mb(spec.id) if full else spec.size_mb,
+            "downloaded": mgr.full_downloaded(spec.id) if full else mgr.is_downloaded(spec.id),
+            # 说话人分离仅完整版(full) + Paraformer 系（能出 sentence_info）支持
+            "diarization": full and spec.engine in ("paraformer", "contextual"),
         })
     return {"models": out, "default_id": DEFAULT_MODEL_ID,
             "compute": compute_label()}
@@ -73,6 +93,7 @@ async def download_model(model_id: str, request: Request):
     mgr: ModelManager = request.app.state.models
     jobs = request.app.state.jobs
     broker = jobs.broker
+    full = _full_backend()
     jobs.model_status[model_id] = {"type": "downloading"}  # 进行中：迟到订阅者不会被误判终态
 
     def _run() -> None:
@@ -82,7 +103,10 @@ async def download_model(model_id: str, request: Request):
                 "downloaded_mb": got_mb, "total_mb": total_mb,
             })
         try:
-            mgr.download(model_id, progress=progress)
+            if full:
+                mgr.download_full(model_id, progress=progress)
+            else:
+                mgr.download(model_id, progress=progress)
             ev = {"type": "done"}
         except Exception as e:  # noqa: BLE001
             ev = {"type": "error", "code": "download_failed", "message": "下载失败，点重试", "detail": str(e)}
@@ -224,7 +248,7 @@ def register_ws(app) -> None:
             # 以磁盘为准：已下载则立刻补发 done（覆盖「连上前就下完」「下载线程已死但文件已就位」
             # 以及避免对已被删除的模型补发过期 done）。
             try:
-                already = mgr.is_downloaded(model_id)
+                already = _model_ready(mgr, model_id)
             except Exception:  # noqa: BLE001  未知 model_id 等
                 already = False
             if already:

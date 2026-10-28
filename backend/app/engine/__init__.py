@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 
-from ..config import NUM_THREADS, models_dir
+from ..config import NUM_THREADS, model_cache_dir
 from ..models import DEFAULT_MODEL_ID
 from .base import ASREngine, EngineOptions, ProgressCallback, Stage
 
@@ -54,7 +54,7 @@ def build_engine(
     """
     opts = EngineOptions(
         model_id=model_id or DEFAULT_MODEL_ID,
-        models_root=models_root or str(models_dir()),
+        models_root=models_root or str(model_cache_dir()),
         use_gpu=use_gpu,
         num_threads=num_threads if num_threads and num_threads > 0 else NUM_THREADS,
         diarization=diarization,

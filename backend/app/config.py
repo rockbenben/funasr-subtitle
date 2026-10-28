@@ -1,8 +1,13 @@
 """应用路径与运行时配置。
 
-所有持久化数据放在 %LOCALAPPDATA%\\funasr-subtitle\\（§0）：
+默认把所有持久化数据放在 %LOCALAPPDATA%\\funasr-subtitle\\（§0）：
 - models/   模型缓存（首启下载）
 - jobs/     每个任务的临时/结果文件，退出时清理
+
+两处可覆盖：
+- FUNASR_SUBTITLE_DATA_DIR 换掉整个数据根（测试用）。
+- MODELSCOPE_CACHE **只**换模型缓存根（jobs/ 仍在数据目录里），
+  funasr / ModelScope 自己也读这个变量，见 model_cache_dir()。
 """
 from __future__ import annotations
 
@@ -78,9 +83,25 @@ def data_dir() -> Path:
 
 
 def models_dir() -> Path:
+    """**默认**的模型缓存根（<数据目录>/models），存在即建。
+
+    它只是默认值：真正生效的根是 model_cache_dir()——用户设了 MODELSCOPE_CACHE 时，
+    模型不会落在这个目录里。
+    """
     d = data_dir() / "models"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def model_cache_dir() -> Path:
+    """模型缓存根：尊重用户的 MODELSCOPE_CACHE（funasr/ModelScope 自己也会读），否则用数据目录。
+
+    这是缓存**根**——ModelScope ≥1.38 的新布局会在它下面再建 models/。应用下载用 local_dir
+    落到 <根>/<owner>/<name>，funasr 的 legacy cache 探测会直接复用，两边不会各存一份。
+    """
+    override = os.environ.get("MODELSCOPE_CACHE")
+    # 不在这里建目录：环境变量写成无效路径时不该让应用起不来；真正下载时再建。
+    return Path(override) if override else models_dir()
 
 
 def jobs_dir() -> Path:
