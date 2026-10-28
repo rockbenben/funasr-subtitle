@@ -76,22 +76,30 @@ class Job(BaseModel):
 
 
 # ---- API 辅助响应 ----
+# 这些类型是「声明的契约」：路由目前直接返回 dict，不走 response_model，
+# 所以改了这里不会自动生效——**改 API 时路由和这里要一起改**（不一致时以路由为准）。
+# 字段与实际返回保持一致，否则后来者会照着错的那份写前端。
+
 
 class ModelInfo(BaseModel):
     id: str
     name: str
     task: str
-    size_mb: float
-    downloaded: bool
+    size_mb: float  # 按后端取：onnx 几百 MB，完整版 0.9–2.1 GB
+    downloaded: bool  # 按后端取：onnx 看 onnx 仓库，完整版看 pt 权重（ASR+VAD+punc）
+    diarization: bool = False  # 当前后端下该模型是否支持说话人分离（仅完整版 + Paraformer）
 
 
 class ModelsResponse(BaseModel):
     models: list[ModelInfo]
     default_id: str
+    compute: str = "CPU"  # "GPU · CUDA" | "CPU"
 
 
 class HealthResponse(BaseModel):
     status: str = "ok"
+    # app 字段被便携启动器用来认「这个端口跑的是不是本程序」（main._running_instance_url）
+    app: str = "funasr-subtitle"
     version: str
 
 
@@ -105,7 +113,8 @@ class OkResponse(BaseModel):
 
 class ErrorBody(BaseModel):
     code: str
-    message: str
+    message: str  # 给人看的话
+    detail: str | None = None  # 原始技术细节，界面折叠进「查看详情」
 
 
 class ErrorResponse(BaseModel):

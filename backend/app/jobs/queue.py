@@ -5,8 +5,9 @@
   排队中/执行中的永不丢。
 - ASR 是阻塞型 CPU 任务，放在 worker 线程里跑；通过 EventBroker 把进度事件
   跨线程投递到 asyncio 侧的 WebSocket。
-- 引擎缓存：键是 (model_id, use_gpu, diarization)——三者任一不同就是另一组 ONNX session，
-  所以键比 model_id 细。加载昂贵故命中复用；同时按 ENGINE_CACHE_SIZE 做 LRU 淘汰，
+- 引擎缓存：键是 (model_id, use_gpu, diarization)——三者任一不同就是另一组会话
+  （onnx 后端是一组 ONNX session，完整版是一个 torch 模型），所以键比 model_id 细。
+  加载昂贵故命中复用；同时按 ENGINE_CACHE_SIZE 做 LRU 淘汰，
   否则来回切模型会把内存吃光（实测 4 键切换 1857MB → 2 键 1027MB，见 engine/README.md §7）。
 """
 from __future__ import annotations
@@ -145,10 +146,10 @@ class JobManager:
                 self._cleanup_input(job_id)
 
     def _get_engine(self, model_id: str, use_gpu: bool = False, diarization: bool = False):
-        """取（必要时加载）引擎。命中复用——ONNX session 加载很贵。
+        """取（必要时加载）引擎。命中复用——模型加载很贵。
 
         缓存是 LRU：超过 ENGINE_CACHE_SIZE 就丢弃最久未用的那个，被丢弃的引擎引用计数
-        归零后其 ONNX session 占的常驻内存随之释放（否则来回切模型会把内存吃光）。
+        归零后其会话占的常驻内存随之释放（否则来回切模型会把内存吃光）。
         淘汰安全前提：任务由**单个 worker 线程串行**执行，_get_engine 与随后的 transcribe
         同线程顺序发生，不存在「另一个任务正在用被淘汰的引擎」。
         """

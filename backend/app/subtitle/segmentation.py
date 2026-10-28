@@ -16,6 +16,10 @@ import re
 from ..config import MAX_CUE_MS
 from ..schemas import Segment
 
+# MAX_CUE_MS：单条字幕最长时长（毫秒），专业规范一般 ≤7s，可用环境变量
+# FUNASR_SUBTITLE_MAX_CUE_MS 覆盖。只有拿到**逐 token 时间**时才能真正卡住时长
+# （比例分配时间的路径没有这个能力）。
+
 # 句子终止标点（在其后切句，标点跟随前句）
 _TERMINALS = "。！？!?…"
 # 次级停顿标点（仅当一句过长时，在此进一步切分以便阅读）
@@ -87,10 +91,6 @@ def _ends_with_abbrev(text: str, next_is_lower: bool) -> bool:
     if w in _TERMINAL_ABBREVS:
         return next_is_lower  # 下一句小写=延续(不切)；大写=新句(切)
     return False
-
-# 单条字幕最长时长（毫秒）：MAX_CUE_MS 自 config 导入，专业规范一般 ≤7s
-# （有逐 token 时间时才能精确执行）；可用环境变量 FUNASR_SUBTITLE_MAX_CUE_MS 覆盖。
-
 
 def _visible_len(s: str) -> float:
     """显示宽度：中日韩字符算 1，拉丁/数字/其它非空白算 0.5（空白不计）。"""

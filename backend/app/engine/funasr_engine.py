@@ -1,14 +1,18 @@
-"""funasr-onnx 实现的 ASREngine（§10）。
+"""funasr-onnx 实现的 ASREngine（§10）——CPU 便携包（onnx 后端）走这条。
 
 §17 验证结论（详见 engine/README.md）：
 - ASR 默认 = iic/SenseVoiceSmall-onnx 的 model_quant.onnx（torch-free）。
   · funasr-onnx 的 SenseVoiceSmall 顶部 `import torch`，但 torch 只在其 __call__ 的
     CTC 贪心解码里用到；我们绕过 __call__，用纯 numpy 解码，运行时无需 torch。
-  · SenseVoice 输出**无时间戳**，且文本前带特殊标记 <|lang|><|emo|><|event|><|itn|>，需剥离。
-  · 时间戳来源：VAD 把音频切成语音片段，每段 [start_ms,end_ms] 即字幕时间戳；
-    每段单独跑 SenseVoice 取文本（句级粒度，足够做字幕）。
-- VAD = fsmn-vad onnx（仅含 model_quant.onnx -> quantize=True），输出 [[start_ms,end_ms],...]。
-- punc = ct-punc onnx（仅含 model_quant.onnx -> quantize=True），给每段文本补标点。
+  · 文本前带特殊标记 <|lang|><|emo|><|event|><|itn|>，需剥离。
+  · 时间戳：funasr-onnx 自己不给，靠 CTC 帧位置反推——去掉前 4 个前缀帧后约 60ms/帧，
+    线性映射到所在 VAD 段的 [start_ms,end_ms]，得到**逐 token** 时间（_sensevoice_timed）。
+    逐 token 时间才有「同一 VAD 段里多句各自定位」的精度（只按 VAD 段给时间会切得太粗）。
+- VAD = fsmn-vad onnx（仅含 model_quant.onnx -> quantize=True），输出 [[start_ms,end_ms],...]，
+  负责圈出「哪里在说话」，不产文本。
+- punc = ct-punc onnx（仅含 model_quant.onnx -> quantize=True）：默认模型 SenseVoice 自带
+  标点（builtin_punc），**不加载** ct-punc；只有 Paraformer 这类不自带标点的模型才用，
+  且是遇到无标点文本时才懒加载。
 - torch-stub 必须在 modelscope 完成初始化、且 scipy/librosa 已 torch-free 导入之后再安装。
 """
 from __future__ import annotations
