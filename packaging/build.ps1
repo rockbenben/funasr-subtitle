@@ -4,7 +4,7 @@
   -> bundle ffmpeg -> README.txt -> zip.
 
   Two variants:
-    -Variant onnx   (default) funasr-onnx, pure CPU, ~340MB  -> funasr-subtitle-win-x64.zip
+    -Variant onnx   (default) funasr-onnx, pure CPU, ~372MB  -> funasr-subtitle-win-x64.zip
     -Variant full   full funasr + torch/CUDA, multi-GB       -> funasr-subtitle-cuda-win-x64.zip
 
   ASCII-only on purpose (PS5.1 mojibake on non-ASCII no-BOM .ps1).

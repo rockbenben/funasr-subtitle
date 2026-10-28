@@ -54,14 +54,14 @@
 
 ## 📦 下载
 
-**不确定选哪个？下 `funasr-subtitle-win-x64.zip`（CPU 包，约 340 MB），绝大多数人够用。**
+**不确定选哪个？下 `funasr-subtitle-win-x64.zip`（CPU 包，约 372 MB），绝大多数人够用。**
 
 前往 **[Releases](https://github.com/rockbenben/funasr-subtitle/releases/latest)** 下载 Windows x64 便携包，解压 → 双击 `funasr-subtitle.exe` → 浏览器里用。两份**界面与操作完全一样**，差的是推理后端（连模型都是两套：CPU 包用 onnx 权重，完整版用 pt 权重）：
 
 | 包                                   | 大小    | 后端                 | 适用                                                                          |
 | ------------------------------------ | ------- | -------------------- | ----------------------------------------------------------------------------- |
-| **funasr-subtitle-win-x64.zip**      | ~340 MB | funasr-onnx · 纯 CPU | 绝大多数人首选（RTF ≈ 0.1，无需显卡）                                         |
-| **funasr-subtitle-cuda-win-x64.zip** | ~2.6 GB | 完整 funasr · torch  | 有 N 卡自动 GPU 加速、无卡回退 CPU；要说话人分离 / Paraformer 高精度 / 大模型 |
+| **funasr-subtitle-win-x64.zip**      | ~372 MB | funasr-onnx · 纯 CPU | 绝大多数人首选（RTF ≈ 0.1，无需显卡）                                         |
+| **funasr-subtitle-cuda-win-x64.zip** | ~2.7 GB | 完整 funasr · torch  | 有 N 卡自动 GPU 加速、无卡回退 CPU；要说话人分离 / Paraformer 高精度 / 大模型 |
 
 > [!NOTE]
 > 首次运行需联网下载模型（CPU 包默认 SenseVoice ≈ 235 MB；完整版用 pt 模型，
@@ -174,7 +174,7 @@ npm run check:contrast # WCAG AA 对比度守护
 **打包便携包**（两种变体）：
 
 ```powershell
-# 默认变体：funasr-onnx 纯 CPU，~340 MB → funasr-subtitle-win-x64.zip
+# 默认变体：funasr-onnx 纯 CPU，~372 MB → funasr-subtitle-win-x64.zip
 #   ⚠️ build.ps1 不会替你装依赖，它直接用现成的 backend\.venv 冻结。
 #      ONNX 推理栈已拆到 [onnx] extra，所以这个 venv 必须是用
 #      `pip install -e "backend[onnx]"` 装出来的（漏装会导致包体缺 funasr-onnx）。
