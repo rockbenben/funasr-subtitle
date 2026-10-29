@@ -2,8 +2,11 @@
 
 与 funasr-onnx 后端的区别：
 - 用 `funasr.AutoModel` 跑 VAD + ASR + (punc) 一体管线，device 可选 cuda（真显卡加速）。
-- 输出解析优先用 `sentence_info`（句级 start/end/text/spk，Paraformer 等带时间戳模型给得到），
-  否则按标点切句 + 比例时间兜底（SenseVoice 无时间戳时）。
+- 时间戳优先用上游的**逐字时间戳**（`generate(output_timestamp=True)`，SenseVoice 也能给——
+  它没有 timestamp 头，上游按帧反推）；其次才是 `sentence_info`（句级 start/end/text/spk，
+  带说话人时只有它有）。两条都拿不到才按标点切句 + 比例时间兜底。
+- 上游不管行长（那是字幕需求），**「每行最多几个字」由我们自己补上**——别把上游的句子
+  直接当最终 cue。
 - 模型下载走 modelscope，缓存根 = config.model_cache_dir()（默认
   %LOCALAPPDATA%\\funasr-subtitle\\models，与 onnx 后端共用一份；用户设了
   MODELSCOPE_CACHE 就跟随它）。

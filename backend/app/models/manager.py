@@ -10,7 +10,8 @@
   会把 <cache>/<owner>/<name> 当作 legacy cache 直接复用。
 - **torch-free**：本模块只 import modelscope，绝不安装 torch-stub
   （modelscope 的 logger 用 find_spec('torch')，发现 torch 就会 import 真 torch_utils）。
-- SenseVoice 仓库含 893MB 的 model.pt（PyTorch 权重），onnx 下载时用 ignore_patterns 跳过。
+- SenseVoice 仓库含 893MB 的 model.pt（PyTorch 权重），onnx 下载时用 ignore_file_pattern 跳过。
+  （旧版 modelscope 的参数名是 ignore_patterns，_snapshot 里已做兼容。）
 """
 from __future__ import annotations
 

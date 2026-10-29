@@ -4,9 +4,10 @@
 用 `FunasrFullEngine.__new__` 绕开 `__init__`（写法见 test_full_tail_recovery.py），
 所以 CI（只装 `[dev]`）也能跑。真正跑推理的版本见 test_full_engine_integration.py。
 
-覆盖两件事：
+覆盖三件事：
 1. **每行最多几个字在完整版上真正生效**——以前直接用上游的句子，行宽是摆设；
-2. **时间来自上游的句级时间戳**（真实起止），不被重新按比例摊到整段音频上。
+2. **时间来自上游**（逐字时间戳优先，其次句级时间戳），不被重新按比例摊到整段音频上；
+3. 逐字时间戳能落到拆出来的每一行上（对不上就整个不给，不给错的）。
 """
 from app.engine.funasr_full_engine import FunasrFullEngine
 from app.schemas import JobOptions

@@ -22,7 +22,7 @@
 
 | 包 | 组件 | 验证版本 | 验证方式 |
 | --- | --- | --- | --- |
-| CPU / onnx | `funasr-onnx` | **0.4.3** | 全量 99 测试（1 skip = DirectML 未装）+ SenseVoice/Paraformer/热词版三条真实推理路径 |
+| CPU / onnx | `funasr-onnx` | **0.4.3** | 全量测试（121 个，1 skip = DirectML 未装）+ SenseVoice/Paraformer/热词版三条真实推理路径 |
 | CUDA / full | `funasr` | **1.4.16** | RTX 3080 Ti 上 SenseVoice / Paraformer / cam++ 三条真实推理路径 |
 
 2026-10-27 依赖升级后复核过：推理栈本体版本没变（都还是最新），周边包动了——
@@ -120,10 +120,9 @@ onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37
   和 `timestamp`（每个词的起止毫秒，60ms/帧）。SenseVoice 也能给（它没有 timestamp 头，
   但上游能按帧反推）。我们把它还原成「带时间的 token」再切句
   （`funasr_full_engine._per_token_pieces`），时间不再按字数比例摊到整段音频上。
-- **句级时间戳**：`generate(sentence_timestamp=True)`。上游两种情况都处理好了——
-  带时间戳头的模型（Paraformer）按标点切句并给每句真实起止；SenseVoice 没有字级时间戳，
-  上游退化成「**VAD 段 = 一句**」（`auto_model._vad_segment_sentences`）。
-  实测 funasr 1.4.16 对 SenseVoice 也能开，不会报错（旧注释说「会 KeyError」已过时）。
+- **句级时间戳**：`generate(sentence_timestamp=True)`。带时间戳头的模型（Paraformer）按标点切句
+  并给每句真实起止；SenseVoice 没有 timestamp 头，开了这个开关上游会退化成
+  「**VAD 段 = 一句**」（`auto_model._vad_segment_sentences`）——实测 funasr 1.4.16 不会报错。
   ⚠️ 但开了 `output_timestamp` 之后，上游对「没有 punc 模型」的句子切分会跳过（它要求
   punc_model），sentence_info 会变空——完整版 SenseVoice 因此走我们自己的逐字路径。
   带说话人时仍以 sentence_info 为准（speaker 只有它有）。
@@ -142,7 +141,9 @@ onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37
 
 ## 4. torch-stub 与 modelscope/scipy 的共存陷阱（重要）
 
-funasr-onnx 必须能 `import torch` 才能 import（`__init__` 会导入 sensevoice_bin）。我们注入一个**stub**：
+**现在的 funasr-onnx 自己已经不需要 torch**（见 §1），但我们仍然注入一个 **stub**——
+它防的不是 funasr-onnx，而是**用户 venv 里装了真 torch** 时 modelscope/scipy 探测到 torch
+后崩掉那条老路：
 - stub 必须有 `__spec__`（否则 `importlib.util.find_spec('torch')` 抛 `ValueError: __spec__ is None`），
   还需 `__version__` 和一个 `Tensor` 占位类（scipy 的 array_api_compat 会 `getattr(torch,'Tensor')`）。
 - **modelscope 与 stub 不能共存**：modelscope 的 logger 用 `find_spec('torch')`，一旦发现 torch 就会
