@@ -22,6 +22,7 @@ import {
 import {
   AudioOutlined,
   DownloadOutlined,
+  GithubOutlined,
   PoweroffOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
@@ -236,12 +237,79 @@ function ModelDownloadPanel({
 }
 
 // ----- 结果面板 -----
-function ResultsPanel({ job, restored }: { job: Job; restored: boolean }) {
+function ResultsPanel({
+  job,
+  restored,
+  file,
+}: {
+  job: Job;
+  restored: boolean;
+  file: File | null;
+}) {
   const { message } = AntApp.useApp();
   const [copied, setCopied] = useState(false);
   const [showFade, setShowFade] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const fullText = useMemo(() => job.segments.map((s) => s.text).join("\n"), [job.segments]);
+
+  // ---- 点句试听：转写完当场确认断句位置对不对、时间轴准不准 ----
+  // 只用隐藏的 <audio>，不造播放器 UI；文件还在内存里（刷新后没了，那次就不给试听）。
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const stopTimer = useRef<number | null>(null);
+  const [playingIdx, setPlayingIdx] = useState<number | null>(null);
+  const audioUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
+
+  useEffect(() => {
+    return () => {
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
+    };
+  }, [audioUrl]);
+
+  const stopAudio = useCallback(() => {
+    if (stopTimer.current !== null) {
+      window.clearTimeout(stopTimer.current);
+      stopTimer.current = null;
+    }
+    audioRef.current?.pause();
+    setPlayingIdx(null);
+  }, []);
+
+  // 卸载/换任务时别让声音留在后台
+  useEffect(() => stopAudio, [stopAudio]);
+
+  const playCue = useCallback(
+    (idx: number) => {
+      const seg = job.segments[idx];
+      const audio = audioRef.current;
+      if (!seg || !audio || !audioUrl) return;
+      if (playingIdx === idx) {
+        stopAudio();
+        return;
+      }
+      stopAudio();
+      audio.currentTime = seg.start_ms / 1000;
+      void audio.play().catch(() => {
+        message.error("这段放不出来，换个文件试试");
+      });
+      setPlayingIdx(idx);
+      // 播到本句末尾就停（时间戳是整段音频的绝对时间）
+      stopTimer.current = window.setTimeout(
+        stopAudio,
+        Math.max(0, seg.end_ms - seg.start_ms),
+      );
+    },
+    [audioUrl, job.segments, message, playingIdx, stopAudio],
+  );
+
+  const onCueKey = useCallback(
+    (e: React.KeyboardEvent, idx: number) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        playCue(idx);
+      }
+    },
+    [playCue],
+  );
 
   useEffect(() => {
     const el = listRef.current;
@@ -304,6 +372,12 @@ function ResultsPanel({ job, restored }: { job: Job; restored: boolean }) {
         想翻成双语字幕？把 .srt 导入{" "}
         <a href={TRANSLATOR_URL} target="_blank" rel="noreferrer">字幕翻译器</a>
       </Text>
+      {audioUrl && (
+        <Text type="secondary" style={{ fontSize: 12, display: "block", marginTop: 4 }}>
+          点任意一句可以试听那一句（再点一次停止）。
+        </Text>
+      )}
+      <audio ref={audioRef} src={audioUrl ?? undefined} preload="metadata" style={{ display: "none" }} />
       <div
         ref={listRef}
         className={showFade ? "scroll-fade" : undefined}
@@ -315,7 +389,19 @@ function ResultsPanel({ job, restored }: { job: Job; restored: boolean }) {
           </Text>
         ) : (
           job.segments.map((seg: Segment, i) => (
-            <div className="seg-row" key={i}>
+            <div
+              key={i}
+              className={
+                "seg-row" +
+                (audioUrl ? " clickable" : "") +
+                (playingIdx === i ? " playing" : "")
+              }
+              onClick={audioUrl ? () => playCue(i) : undefined}
+              onKeyDown={audioUrl ? (e) => onCueKey(e, i) : undefined}
+              role={audioUrl ? "button" : undefined}
+              tabIndex={audioUrl ? 0 : undefined}
+              aria-label={audioUrl ? `试听：${seg.text}` : undefined}
+            >
               <span className="ts" style={{ fontSize: 12.5 }}>
                 {formatTimestamp(seg.start_ms)}
                 <br />
@@ -650,7 +736,9 @@ export default function App() {
         : "开始转写";
 
   // 结果卡排在设置之前：跑完第一眼就能看到字幕（否则整块落在折叠下方）。
-  const results = isDone && job ? <ResultsPanel job={job} restored={restored} /> : null;
+  const results = isDone && job ? (
+    <ResultsPanel job={job} restored={restored} file={file} />
+  ) : null;
 
   return (
     <div style={{ position: "relative", zIndex: 1, minHeight: "100%", padding: "32px 20px 80px" }}>
@@ -677,6 +765,16 @@ export default function App() {
             </span>
           </Flex>
           <Space size={10}>
+            <a
+              className="repo-link"
+              href="https://github.com/rockbenben/funasr-subtitle"
+              target="_blank"
+              rel="noreferrer"
+              title="源码、下载新版本、提问题都here"
+              aria-label="GitHub 仓库"
+            >
+              <GithubOutlined />
+            </a>
             <Tag color={compute.startsWith("GPU") ? "gold" : "default"} style={{ marginRight: 0 }}>
               {compute.startsWith("GPU") ? "用显卡跑" : "用 CPU 跑"}
             </Tag>

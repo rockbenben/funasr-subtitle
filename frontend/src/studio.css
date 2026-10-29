@@ -93,6 +93,16 @@ body::after {
 .ant-typography a { color: var(--amber-soft); }
 .ant-typography a:hover { color: #FFD98F; }
 
+/* 页头的仓库链接：浏览器默认蓝色链接压在暖炭底上读不清，自己定色。 */
+.repo-link {
+  color: var(--text-dim);
+  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  transition: color .18s;
+}
+.repo-link:hover { color: var(--amber-soft); }
+
 /* 禁用输入框的占位符：字段本身灰着，但格式说明还得读得清。 */
 .ant-input:disabled::placeholder,
 .ant-input[disabled]::placeholder { color: var(--text-dim); }
@@ -151,6 +161,12 @@ body::after {
 }
 .seg-row:hover { background: rgba(232, 163, 61, 0.04); }
 .seg-text { line-height: 1.7; }
+
+/* ---- 点句试听：可点的行 + 正在播的那句 ---- */
+.seg-row.clickable { cursor: pointer; }
+.seg-row.clickable:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
+.seg-row.playing { background: rgba(232, 163, 61, 0.08); }
+.seg-row.playing .seg-text { color: var(--amber-soft); }
 
 /* ---- 拖放区：hover / 拖入都要看得出（内联 borderColor 会吃掉 antd 的 :hover，所以边框交给这里）---- */
 .ant-upload.ant-upload-drag.drop-zone { border-color: var(--border); transition: border-color .18s, background .18s; }
