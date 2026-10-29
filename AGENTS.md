@@ -75,6 +75,8 @@
   别把上游的句子直接当最终 cue。时间戳优先用上游的逐字时间戳
   （`output_timestamp=True`，SenseVoice 也有），其次才是 `sentence_info`（句级、带说话人）。
 - 导出文件名走 RFC 5987：中文名只进 `filename*`，另给 ASCII 回退。
+- `Segment.words`（逐字时间戳）：拿得到逐字时间的路径才填（onnx SenseVoice / 完整版），
+  拿不到就留 `None`（onnx Paraformer）——**别填猜的**，卡拉OK 靠它。
 - 引擎的 `use_gpu` 语义**随后端变**：onnx 是 DirectML（前端开关恒 false）；full **完全不看这个值**，由后端自己按 `torch.cuda.is_available()` 决定，`FUNASR_SUBTITLE_FORCE_CPU=1` 可强制 CPU。
 
 **打包契约**

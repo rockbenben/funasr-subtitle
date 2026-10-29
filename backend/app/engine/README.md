@@ -86,6 +86,9 @@ onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37
   界面上的「数字转阿拉伯数字」开关就是它（`JobOptions.itn`，默认开 = 从前的行为）。
 - **特殊标记**：输出文本前缀带 `<|lang|><|emo|><|event|><|itn|>`（如 `<|zh|><|NEUTRAL|><|Speech|><|withitn|>`），
   用正则 `<\|[^|>]*\|>` 剥离。
+- **逐字时间戳（导出用）**：拿得到逐字时间的路径（onnx SenseVoice / 完整版）会把每个字的起止毫秒
+  挂到字幕条上（`Segment.words`），JSON 导出里就有 `words` 字段 —— 卡拉OK / 逐词高亮可以直接用。
+  onnx Paraformer 没有字级时间（ONNX 导出只有 `logits`+`token_num`），那条路的 `words` 为空。
 - **标点**：`withitn` 模式输出**已自带标点**（逗号/句号/问号）。→ 默认 ASR **跳过 ct-punc**，
   否则会出现 `？？？` 这类重复标点。（`ModelSpec.builtin_punc=True`）
 - **实测**（10.3s 中文样本，CPU，模型已加载）：ASR 推理本身 ~0.2s（RTF≈0.02）；

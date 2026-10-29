@@ -31,11 +31,24 @@ class JobStatus(str, Enum):  # noqa: UP042
 Language = Literal["auto", "zh", "yue", "en", "ja", "ko"]
 
 
+class Word(BaseModel):
+    """逐字（逐词）时间戳——卡拉OK / 逐词高亮用。
+
+    text 是这一字/词的原文；时间取自上游的逐字时间戳
+    （onnx SenseVoice 由 CTC 帧位反推，完整版用上游 output_timestamp）。
+    """
+    text: str
+    start_ms: int
+    end_ms: int
+
+
 class Segment(BaseModel):
     start_ms: int
     end_ms: int
     text: str
-    speaker: str | None = None  # diarization 开启时存在，如 "spk0"
+    speaker: str | None = None
+    # 逐字时间戳；拿不到逐字时间的路径（onnx Paraformer）这里为 null
+    words: list[Word] | None = None  # diarization 开启时存在，如 "spk0"
 
 
 Punctuation = Literal["auto", "on", "off"]

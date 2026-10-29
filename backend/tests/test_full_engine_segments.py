@@ -111,3 +111,43 @@ def test_per_token_alignment_failure_falls_back():
     eng = FunasrFullEngine.__new__(FunasrFullEngine)
     assert eng._per_token_pieces(res[0]) is None
 
+
+def test_words_from_times_aligns_chinese_by_char():
+    """上游 sentence_info 的逐词时间：中文按字对齐。"""
+    eng = FunasrFullEngine.__new__(FunasrFullEngine)
+    words = eng._words_from_times("你好，世界。", [[0, 100], [100, 200], [300, 400], [400, 500]])
+    assert [(w.text, w.start_ms, w.end_ms) for w in words] == [
+        ("你", 0, 100), ("好", 100, 200), ("世", 300, 400), ("界", 400, 500),
+    ]
+
+
+def test_words_from_times_aligns_english_by_word():
+    eng = FunasrFullEngine.__new__(FunasrFullEngine)
+    words = eng._words_from_times("hello world", [[0, 100], [200, 300]])
+    assert [(w.text, w.start_ms, w.end_ms) for w in words] == [("hello", 0, 100), ("world", 200, 300)]
+
+
+def test_words_from_times_gives_up_when_counts_differ():
+    """对不上就给 None（没有逐字时间戳），不给错的。"""
+    eng = FunasrFullEngine.__new__(FunasrFullEngine)
+    assert eng._words_from_times("你好世界", [[0, 100]]) is None
+    assert eng._words_from_times("你好世界", None) is None
+
+
+def test_sentence_info_carries_word_timings():
+    """上游 sentence_info 的逐词时间要落到拆出来的每一行上。"""
+    res = [{
+        "text": "你好世界，这是一个测试。",
+        "sentence_info": [{
+            "text": "你好世界，这是一个测试。",
+            "start": 0, "end": 2000,
+            "timestamp": [[0, 100], [100, 200], [200, 300], [300, 400],
+                          [600, 700], [700, 800], [800, 900], [900, 1000],
+                          [1100, 1200], [1200, 1300]],
+        }],
+    }]
+    segs = _segs(res, max_chars=10, total_ms=2000)
+    assert len(segs) >= 2
+    assert segs[0].words, "第一行应带逐字时间戳"
+    assert "".join(w.text for w in segs[0].words).startswith("你好世界")
+

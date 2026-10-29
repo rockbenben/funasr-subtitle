@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 
 from ..config import MAX_CUE_MS
-from ..schemas import Segment
+from ..schemas import Segment, Word
 
 # MAX_CUE_MS：单条字幕最长时长（毫秒），专业规范一般 ≤7s，可用环境变量
 # FUNASR_SUBTITLE_MAX_CUE_MS 覆盖。只有拿到**逐 token 时间**时才能真正卡住时长
@@ -277,6 +277,34 @@ def segment_timed(
         if en <= st:
             en = st + 1
         segs.append(Segment(start_ms=int(st), end_ms=int(en), text=txt))
+    return segs
+
+
+def attach_words(segs: list[Segment], pieces: list[tuple[str, int]]) -> list[Segment]:
+    """给字幕条补上逐字时间戳（卡拉OK / 逐词高亮用）。
+
+    pieces 是这一段音频的带时间 token（文本, 起始毫秒）。按时间归属：每个 token
+    落在哪条字幕的时间区间里就挂到那条上；一个字的时间区间是「它到下一个 token」。
+
+    拿不到逐字时间的路径（onnx Paraformer）不调用本函数，words 留空。
+    """
+    if not pieces or not segs:
+        return segs
+    n = len(pieces)
+    for si, seg in enumerate(segs):
+        # 最后一个 token 的时间正好落在本条结尾上（后面没有下一条了），要算进来
+        limit = seg.end_ms + 1 if si == len(segs) - 1 else seg.end_ms
+        picked = [k for k in range(n) if seg.start_ms <= pieces[k][1] < limit]
+        words: list[Word] = []
+        for k in picked:
+            txt, t = pieces[k]
+            if not txt.strip():
+                continue
+            # 结束时间 = 下一个 token 的起点，但不超过本条的结束时间
+            end = min(pieces[k + 1][1] if k + 1 < n else seg.end_ms, seg.end_ms)
+            words.append(Word(text=txt, start_ms=int(t), end_ms=int(max(t, end))))
+        if words:
+            seg.words = words
     return segs
 
 

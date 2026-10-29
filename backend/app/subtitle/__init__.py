@@ -11,6 +11,7 @@ from .formatters import (
     to_vtt,
 )
 from .segmentation import (
+    attach_words,
     enforce_monotonic,
     segment_span,
     segment_timed,
@@ -20,6 +21,7 @@ from .segmentation import (
 
 __all__ = [
     "EXPORT_FORMATS",
+    "attach_words",
     "enforce_monotonic",
     "export_segments",
     "segment_span",

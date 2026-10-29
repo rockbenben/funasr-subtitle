@@ -71,6 +71,9 @@ def to_json(segments: Iterable[Segment]) -> str:
             "end_ms": seg.end_ms,
             "text": seg.text.strip(),
             **({"speaker": seg.speaker} if seg.speaker else {}),
+            # 逐字时间戳（卡拉OK / 逐词高亮用）；拿不到逐字时间的路径没有这个字段
+            **({"words": [{"text": w.text, "start_ms": w.start_ms, "end_ms": w.end_ms}
+                          for w in seg.words]} if seg.words else {}),
         }
         for seg in segments
     ]

@@ -3,6 +3,7 @@ import itertools
 
 from app.schemas import Segment
 from app.subtitle.segmentation import (
+    attach_words,
     enforce_monotonic,
     segment_span,
     segment_timed,
@@ -254,3 +255,26 @@ def test_line_break_keeps_all_text():
     for a, b in itertools.pairwise(segs):
         assert b.start_ms >= a.start_ms
         assert b.end_ms > b.start_ms
+
+
+# ---- 逐字时间戳（卡拉OK / 逐词高亮用）----
+
+def test_attach_words_assigns_tokens_by_time():
+    pieces = [("你", 100), ("好", 400), ("。", 700), ("世", 1200), ("界", 1500)]
+    segs = [
+        Segment(start_ms=100, end_ms=900, text="你好。"),
+        Segment(start_ms=900, end_ms=2000, text="世界"),
+    ]
+    attach_words(segs, pieces)
+    assert [(w.text, w.start_ms, w.end_ms) for w in segs[0].words] == [
+        ("你", 100, 400), ("好", 400, 700), ("。", 700, 900),
+    ]
+    assert [(w.text, w.start_ms, w.end_ms) for w in segs[1].words] == [
+        ("世", 1200, 1500), ("界", 1500, 2000),
+    ]
+
+
+def test_attach_words_leaves_segments_without_tokens_alone():
+    segs = [Segment(start_ms=0, end_ms=100, text="无")]
+    attach_words(segs, [("有", 500)])
+    assert segs[0].words is None

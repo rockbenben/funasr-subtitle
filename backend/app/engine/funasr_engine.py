@@ -33,7 +33,7 @@ import numpy as np
 from ..config import MIN_PAUSE_MS
 from ..models import PUNC_MODEL, VAD_MODEL, ModelManager, get_model
 from ..schemas import JobOptions, Segment
-from ..subtitle import enforce_monotonic, segment_span, segment_timed, strip_terminal_punct
+from ..subtitle import attach_words, enforce_monotonic, segment_span, segment_timed, strip_terminal_punct
 from ..subtitle.segmentation import _STRIP_TERMINALS
 from .base import EngineOptions, ProgressCallback
 
@@ -403,7 +403,8 @@ class FunasrEngine:
                         timed = _apply_punct_to_timed(timed, punct)
                 elif timed and not add_punct:
                     timed = _strip_terminal_timed(timed)
-                segments.extend(segment_timed(timed, end_ms, max_chars=max_chars))
+                segments.extend(attach_words(
+                    segment_timed(timed, end_ms, max_chars=max_chars), timed))
             else:
                 # Paraformer/Contextual：无逐 token 时间，先标点，再按字数比例切句
                 text = self._asr_paraformer(chunk, options.hotwords or "")

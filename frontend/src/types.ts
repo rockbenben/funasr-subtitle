@@ -11,11 +11,19 @@ export type JobStatus =
   | "done"
   | "error";
 
+export interface Word {
+  text: string;
+  start_ms: number;
+  end_ms: number;
+}
+
 export interface Segment {
   start_ms: number;
   end_ms: number;
   text: string;
   speaker?: string;
+  /** 逐字时间戳（卡拉OK / 逐词高亮用）；拿不到逐字时间的路径没有这个字段。 */
+  words?: Word[];
 }
 
 export interface Job {
