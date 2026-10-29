@@ -69,6 +69,20 @@ def test_create_job_clamps_pause_ms(client):
     assert job["options"]["pause_ms"] == 0
 
 
+def test_create_job_accepts_itn_flag(client):
+    """ITN（数字转阿拉伯数字）开关要能随任务带进来；默认开。"""
+    files = {"file": ("a.wav", b"RIFFfake", "audio/wav")}
+    r = client.post("/api/jobs", files=files, data={"itn": "false"})
+    assert r.status_code == 200
+    job_id = r.json()["job_id"]
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["options"]["itn"] is False
+
+    r = client.post("/api/jobs", files=files, data={})
+    job = client.get(f"/api/jobs/{r.json()['job_id']}").json()
+    assert job["options"]["itn"] is True
+
+
 def test_models_full_backend_contract(client, monkeypatch):
     """完整版：模型面板必须按 pt 模型（ASR+VAD+punc）判断，不能拿 onnx 的体积/状态充数。"""
     import app.engine as engine

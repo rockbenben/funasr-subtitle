@@ -347,6 +347,7 @@ export default function App() {
   const [hotwords, setHotwords] = useState("");
   const [maxChars, setMaxChars] = useState(30);
   const [pauseMs, setPauseMs] = useState(0);
+  const [itn, setItn] = useState(true);
   const [punctuation, setPunctuation] = useState<"auto" | "on" | "off">("auto");
   const [compute, setCompute] = useState("CPU");
   // DirectML 实测对量化模型比 CPU 慢，已隐藏开关；后端仍保留 use_gpu 能力（默认 false）。
@@ -401,6 +402,7 @@ export default function App() {
     setHotwords(saved.options.hotwords);
     setMaxChars(saved.options.max_chars ?? 30);
     setPauseMs(saved.options.pause_ms ?? 0);
+    setItn(saved.options.itn ?? true);
     setPunctuation(saved.options.punctuation ?? "auto");
   }, []);
 
@@ -542,6 +544,7 @@ export default function App() {
         useGpu,
         maxChars,
         pauseMs,
+        itn,
         punctuation,
       });
       rememberJob(job_id);
@@ -597,7 +600,7 @@ export default function App() {
         filename: file.name,
         status: "queued",
         percent: 0,
-        options: { model_id: modelId, language, diarization: diarization && diarAvailable, hotwords, use_gpu: useGpu, max_chars: maxChars, pause_ms: pauseMs, punctuation },
+        options: { model_id: modelId, language, diarization: diarization && diarAvailable, hotwords, use_gpu: useGpu, max_chars: maxChars, pause_ms: pauseMs, itn, punctuation },
         segments: [],
         created_at: new Date().toISOString(),
       });
@@ -612,7 +615,7 @@ export default function App() {
       setRunning(false);
       setFetchingModel(false);
     }
-  }, [file, running, modelId, language, diarization, diarAvailable, hotwords, maxChars, pauseMs, punctuation, modelNotDownloaded, clearRunState, loadModels]);
+  }, [file, running, modelId, language, diarization, diarAvailable, hotwords, maxChars, pauseMs, itn, punctuation, modelNotDownloaded, clearRunState, loadModels]);
 
   // 取消：不管后端什么时候确认，界面立刻从「在跑」回到「可重来」，不留半截进度卡。
   const onCancel = useCallback(async () => {
@@ -823,18 +826,28 @@ export default function App() {
                 </Flex>
               </Flex>
 
-              <Tooltip title={diarAvailable
-                ? "给每句字幕标上是谁说的，导出的字幕里会带 [spk0]、[spk1] 这样的记号"
-                : "只有「完整版」程序配 Paraformer 模型能区分说话人。轻量版（onnx）和 SenseVoice 做不到。"}>
-                <Flex align="center" gap={10}>
-                  <span className="switch-hit">
-                    <Switch checked={diarization && diarAvailable} disabled={!diarAvailable} onChange={setDiarization} />
-                  </span>
-                  <Text type={diarAvailable ? undefined : "secondary"}>
-                    区分说话人{diarAvailable ? "" : "（需完整版 + Paraformer）"}
-                  </Text>
-                </Flex>
-              </Tooltip>
+              <Flex gap={28} wrap align="center">
+                <Tooltip title={diarAvailable
+                  ? "给每句字幕标上是谁说的，导出的字幕里会带 [spk0]、[spk1] 这样的记号"
+                  : "只有「完整版」程序配 Paraformer 模型能区分说话人。轻量版（onnx）和 SenseVoice 做不到。"}>
+                  <Flex align="center" gap={10}>
+                    <span className="switch-hit">
+                      <Switch checked={diarization && diarAvailable} disabled={!diarAvailable} onChange={setDiarization} />
+                    </span>
+                    <Text type={diarAvailable ? undefined : "secondary"}>
+                      区分说话人{diarAvailable ? "" : "（需完整版 + Paraformer）"}
+                    </Text>
+                  </Flex>
+                </Tooltip>
+                <Tooltip title="把说话里的中文数字写成阿拉伯数字：「二零二五年」写成「2025年」，「十五台」写成「15台」；「三个苹果」这种带量词的不动。关掉就保留中文数字原样。">
+                  <Flex align="center" gap={10}>
+                    <span className="switch-hit">
+                      <Switch checked={itn} onChange={setItn} />
+                    </span>
+                    <Text>数字转阿拉伯数字</Text>
+                  </Flex>
+                </Tooltip>
+              </Flex>
 
               {!needsDownload && modelNotDownloaded && currentModel && (
                 <ModelDownloadPanel

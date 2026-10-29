@@ -66,6 +66,9 @@ DEFAULT_PAUSE_MS = _env_int("PAUSE_MS", 0)
 # 停顿阈值的下限：上游 VAD 自己要 150ms 才能确认一段静默（speech_to_sil_time_thres），
 # 比这更小的值等于让它把每个音素都当停顿用，必须夹住。
 MIN_PAUSE_MS = 150
+# 逆文本规整（上游 use_itn / SenseVoice 的 withitn）：把口语里的中文数字写成阿拉伯数字
+# （「二零二五年」→「2025年」）。默认开（= 从前的行为）；关掉则保留「二〇二五年」原样。
+DEFAULT_ITN = _env_bool("ITN", True)
 # 上传大小上限（MB，0=不限制）
 MAX_UPLOAD_MB = _env_int("MAX_UPLOAD_MB", 0)
 # 内存里保留的已完成任务数上限：每个 Job 常驻全部 segments，不设限则长会话下无限增长。

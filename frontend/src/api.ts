@@ -92,6 +92,7 @@ export interface CreateJobOptions {
   useGpu: boolean;
   maxChars: number;
   pauseMs: number;
+  itn: boolean;
   punctuation: "auto" | "on" | "off";
 }
 
@@ -108,6 +109,7 @@ export async function createJob(
   form.append("use_gpu", opts.useGpu ? "true" : "false");
   form.append("max_chars", String(opts.maxChars));
   form.append("pause_ms", String(opts.pauseMs));
+  form.append("itn", opts.itn ? "true" : "false");
   form.append("punctuation", opts.punctuation);
 
   const res = await fetch("/api/jobs", { method: "POST", body: form });

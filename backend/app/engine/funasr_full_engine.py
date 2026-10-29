@@ -164,7 +164,7 @@ class FunasrFullEngine:
         if progress:
             progress("asr", 10.0)
         lang = options.language if options.language in _VALID_LANGS else "auto"
-        gen = dict(input=wav, cache={}, language=lang, use_itn=True, batch_size_s=300)
+        gen = dict(input=wav, cache={}, language=lang, use_itn=options.itn, batch_size_s=300)
         # sentence_timestamp：两种模型都要开。
         # - 带时间戳头的（Paraformer）：上游按标点切句并给每句真实起止时间；
         # - 不带的（SenseVoice）：上游退化成「VAD 段 = 一句」（auto_model._vad_segment_sentences），

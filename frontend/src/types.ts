@@ -31,6 +31,7 @@ export interface Job {
     use_gpu?: boolean;
     max_chars?: number;
     pause_ms?: number;
+    itn?: boolean;
     punctuation?: "auto" | "on" | "off";
   };
   segments: Segment[];

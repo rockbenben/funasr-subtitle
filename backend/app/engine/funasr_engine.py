@@ -374,7 +374,7 @@ class FunasrEngine:
 
             if self._engine_kind == "sensevoice":
                 # SenseVoice：从 CTC 帧位置推出**真实** token 时间戳，按自然语句切句
-                timed = self._sensevoice_timed(chunk, lang, start_ms, end_ms)
+                timed = self._sensevoice_timed(chunk, lang, start_ms, end_ms, itn=options.itn)
                 report("asr", (i + 1) / n * 100.0)
                 text = "".join(p for p, _ in timed)
                 is_cjk = bool(_CJK_RE.search(text))
@@ -463,17 +463,21 @@ class FunasrEngine:
     _SV_PREFIX_FRAMES = 4
 
     def _sensevoice_timed(
-        self, chunk: np.ndarray, language: str, span_start_ms: int, span_end_ms: int
+        self, chunk: np.ndarray, language: str, span_start_ms: int, span_end_ms: int,
+        itn: bool = True,
     ) -> list[tuple[str, int]]:
         """SenseVoice CTC 解码 + 逐 token 时间戳（绝对 ms）。
 
         §M8 实测：去掉前 4 个前缀帧后，语音帧约 60ms/帧。token 时间按帧位置线性映射到
         [span_start_ms, span_end_ms]，特殊标记 <|...|> 跳过。
+
+        itn：上游的逆文本规整标签（withitn/woitn）——把口语里的中文数字写成阿拉伯数字
+        （「二零二五年」→「2025年」）。关掉则保留「二〇二五年」原样。
         """
         asr = self._asr
         feats, feats_len = asr.extract_feat([chunk])
         lid = np.array([asr._get_lid(language)], dtype=np.int32)
-        tn = np.array([asr._get_tnid("withitn")], dtype=np.int32)
+        tn = np.array([asr._get_tnid("withitn" if itn else "woitn")], dtype=np.int32)
         ctc_logits, enc_lens = asr.infer(feats, feats_len, lid, tn)
         ctc_logits = np.asarray(ctc_logits)
         T = int(enc_lens[0])

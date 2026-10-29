@@ -64,6 +64,14 @@ onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37
     `fsmn_vad_streaming/model.py:925`），**传显式值会关掉上游的动态静音调度**。
   - 代价（已知取舍）：断成两段后每段单独转写、单独加标点，段末的逗号会变成句号。
   - 字幕层（`subtitle/segmentation.py`）的断句依据只有「标点」和「行宽」两种。
+- **数字规范化（ITN）**：SenseVoice 的第 4 个前缀 token 是 ITN 标签（`withitn`=14 / `woitn`=15，
+  见 `funasr_onnx/sensevoice_bin.py:textnorm_dict`），完整版对应 `generate(use_itn=...)`。
+  实测（`tests/fixtures/sample_zh_numbers.wav`，TTS 朗读「我有三个苹果，二零二五年要买十五台电脑。」）：
+  - `withitn`：「我有三个苹果，**2025**年要买**15**台电脑。」
+  - `woitn`：「我有三个苹果，**二〇二五**年要买**十五**台电脑。」
+
+  → 方向是**中文数字 → 阿拉伯数字**（不是反过来）；**带量词的「三个」两种模式都不转**。
+  界面上的「数字转阿拉伯数字」开关就是它（`JobOptions.itn`，默认开 = 从前的行为）。
 - **特殊标记**：输出文本前缀带 `<|lang|><|emo|><|event|><|itn|>`（如 `<|zh|><|NEUTRAL|><|Speech|><|withitn|>`），
   用正则 `<\|[^|>]*\|>` 剥离。
 - **标点**：`withitn` 模式输出**已自带标点**（逗号/句号/问号）。→ 默认 ASR **跳过 ct-punc**，

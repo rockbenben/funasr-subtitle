@@ -14,6 +14,8 @@ from app.models import DEFAULT_MODEL_ID, ModelManager
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_zh.wav"
 EN_FIXTURE = Path(__file__).parent / "fixtures" / "sample_en_runon.wav"
+# 中文数字样本（Windows TTS 朗读「我有三个苹果，二零二五年要买十五台电脑。」）
+NUM_FIXTURE = Path(__file__).parent / "fixtures" / "sample_zh_numbers.wav"
 
 _mgr = ModelManager()
 _have_models = _mgr.is_downloaded(DEFAULT_MODEL_ID)
@@ -146,6 +148,34 @@ def test_pause_threshold_off_keeps_default_split():
     a = engine.transcribe(wav, sr, JobOptions(language="zh", max_chars=30))
     b = engine.transcribe(wav, sr, JobOptions(language="zh", max_chars=30, pause_ms=0))
     assert [s.text for s in a] == [s.text for s in b]
+
+
+@pytest.mark.skipif(not NUM_FIXTURE.exists(), reason="缺中文数字测试音频")
+def test_itn_switch_writes_chinese_numerals_as_digits():
+    """ITN（上游 use_itn / SenseVoice 的 withitn）：口语里的中文数字写成阿拉伯数字。
+
+    音频是 TTS 朗读「我有三个苹果，二零二五年要买十五台电脑。」——
+    开着时「二零二五年」→「2025年」、「十五台」→「15台」；关掉则保留中文数字原样。
+    「三个苹果」带量词，两种模式都不动（实测）。
+    """
+    from app.engine import build_engine
+    from app.media import decode_to_16k_mono
+    from app.schemas import JobOptions
+
+    wav, sr = decode_to_16k_mono(NUM_FIXTURE)
+    engine = build_engine()
+    engine.load()
+    on = engine.transcribe(wav, sr, JobOptions(language="zh", max_chars=30, itn=True))
+    off = engine.transcribe(wav, sr, JobOptions(language="zh", max_chars=30, itn=False))
+    text_on = "".join(s.text for s in on)
+    text_off = "".join(s.text for s in off)
+
+    assert "2025" in text_on, text_on
+    assert "15" in text_on, text_on
+    assert "2025" not in text_off, text_off
+    assert "十五" in text_off, text_off
+    # 带量词的不受影响：两种模式都保留「三个」
+    assert "三个" in text_on and "三个" in text_off
 
 
 def test_directml_gpu_if_available():
