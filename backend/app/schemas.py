@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .config import DEFAULT_MAX_CHARS
+from .config import DEFAULT_MAX_CHARS, DEFAULT_PAUSE_MS
 
 
 # 保持 (str, Enum) 而不是 StrEnum：StrEnum 会把 str() 变成取值本身，
@@ -53,6 +53,11 @@ class JobOptions(BaseModel):
     # 0=不限制（只按句末标点切）。超长在安全边界（标点>词边界>CJK 字）断，不拆英文词。
     # 默认值可用环境变量 FUNASR_SUBTITLE_MAX_CHARS 调整。
     max_chars: int = Field(default=DEFAULT_MAX_CHARS, ge=0, le=100)
+    # 停顿断句阈值（毫秒）：相邻字之间静默超过这个值，就优先在这个停顿处断句。
+    # 0=不按停顿断（默认，只按字数和标点断）。仅在拿得到逐字时间的路径上有效
+    # （onnx SenseVoice / 完整版 Paraformer 的字级时间戳）；按比例分配时间的路径没有这个信号。
+    # 默认值可用环境变量 FUNASR_SUBTITLE_PAUSE_MS 调整。
+    pause_ms: int = Field(default=DEFAULT_PAUSE_MS, ge=0, le=5000)
 
 
 class JobError(BaseModel):

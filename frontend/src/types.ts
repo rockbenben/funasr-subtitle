@@ -30,6 +30,7 @@ export interface Job {
     hotwords: string;
     use_gpu?: boolean;
     max_chars?: number;
+    pause_ms?: number;
     punctuation?: "auto" | "on" | "off";
   };
   segments: Segment[];

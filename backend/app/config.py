@@ -60,6 +60,12 @@ STALL_TIMEOUT_S = _env_float("STALL_TIMEOUT", 90.0)
 MAX_CUE_MS = _env_int("MAX_CUE_MS", 7000)
 # 每行最大「显示宽度」默认值（0=不限制；UI 可逐任务调整）
 DEFAULT_MAX_CHARS = _env_int("MAX_CHARS", 30)
+# 停顿断句阈值（毫秒，0=不按停顿断）：相邻字之间的静默超过这个值就优先在那里断句。
+# 实现是上游 VAD 的静音阈值（说话停下来的地方本来就会断成新语音段）。
+DEFAULT_PAUSE_MS = _env_int("PAUSE_MS", 0)
+# 停顿阈值的下限：上游 VAD 自己要 150ms 才能确认一段静默（speech_to_sil_time_thres），
+# 比这更小的值等于让它把每个音素都当停顿用，必须夹住。
+MIN_PAUSE_MS = 150
 # 上传大小上限（MB，0=不限制）
 MAX_UPLOAD_MB = _env_int("MAX_UPLOAD_MB", 0)
 # 内存里保留的已完成任务数上限：每个 Job 常驻全部 segments，不设限则长会话下无限增长。

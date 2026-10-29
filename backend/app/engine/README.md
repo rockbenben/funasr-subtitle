@@ -56,6 +56,14 @@ onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37
   并把同一 VAD 段内的多句各自定位（解决「切分太粗糙」）。
   Paraformer 路径无逐 token 时间 → 退回按字数比例分配（`segment_span`）。
   （这是 onnx 后端；完整版 torch 后端用 funasr 的 `sentence_info` 给 Paraformer 句级时间戳。）
+- **停顿断句（issue #5）用上游 VAD 的静音阈值实现，不在字幕层自造规则**：
+  说话停下来的地方本来就会被 VAD 切成新的语音段，我们只是把「静默多久算一段」调小。
+  - onnx：`Fsmn_vad(..., max_end_sil=pause_ms)`（上游参数，默认取 config 的 800ms）；
+    阈值不同就建不同实例并缓存（模型只有 2MB）。
+  - 完整版：`generate(..., max_end_silence_time=pause_ms)`（上游 runtime kwarg，
+    `fsmn_vad_streaming/model.py:925`），**传显式值会关掉上游的动态静音调度**。
+  - 代价（已知取舍）：断成两段后每段单独转写、单独加标点，段末的逗号会变成句号。
+  - 字幕层（`subtitle/segmentation.py`）的断句依据只有「标点」和「行宽」两种。
 - **特殊标记**：输出文本前缀带 `<|lang|><|emo|><|event|><|itn|>`（如 `<|zh|><|NEUTRAL|><|Speech|><|withitn|>`），
   用正则 `<\|[^|>]*\|>` 剥离。
 - **标点**：`withitn` 模式输出**已自带标点**（逗号/句号/问号）。→ 默认 ASR **跳过 ct-punc**，
@@ -69,6 +77,29 @@ onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37
 - **ONNX 来源**：`iic/speech_fsmn_vad_zh-cn-16k-common-onnx`，**只含 `model_quant.onnx`** → 必须 `quantize=True`。
 - **API**：`Fsmn_vad(dir, quantize=True)(wav_float32_16k)` → `[[[start_ms,end_ms], ...]]`
   （最外层按 batch；无语音时为 `[[]]`，我们兜底为整段一片）。
+- **静音阈值（停顿断句用它）**：
+  - onnx 版（funasr-onnx 的 e2e-VAD 副本）：只有**固定**阈值，构造参数 `max_end_sil`
+    （默认取 config 的 `max_end_silence_time=800`）。
+  - 完整版（torch `iic/speech_fsmn_vad_zh-cn-16k-common-pytorch`）：默认走**动态静音调度**
+    `DEFAULT_SILENCE_SCHEDULE`（段越长越耐静音：前 10s 容忍 2000ms、30s 容忍 800ms、60s 后 200ms，
+    注释写的是「audio already complete, cut by natural pauses」）；**显式传
+    `max_end_silence_time` 会关掉这个调度**，改成固定阈值
+    （`fsmn_vad_streaming/model.py:925`、`1010-1013`）。
+  - 实测（10.3s 样本，句中有 ~500ms 与 ~1040ms 两处停顿）：默认调度 → 1 段；
+    `max_end_silence_time=500` → 2 段；`=300` → 3 段（逗号处也断开）。
+
+## 2.1 完整版（torch 后端）怎么接上游
+
+完整版直接用上游 `funasr.AutoModel`（一条管线：VAD → ASR → 标点 → 切句 → 说话人），
+我们只做两件事：
+
+- **句级时间戳**：`generate(sentence_timestamp=True)`。上游两种情况都处理好了——
+  带时间戳头的模型（Paraformer）按标点切句并给每句真实起止；SenseVoice 没有字级时间戳，
+  上游退化成「**VAD 段 = 一句**」（`auto_model._vad_segment_sentences`）。
+  实测 funasr 1.4.16 对 SenseVoice 也能开，不会报错（旧注释说「会 KeyError」已过时）。
+- **每行字数上限**：上游不管行长（那是字幕需求），所以我们再按 `max_chars` 拆一刀，
+  拆出来的行仍用这句的真实起止时间（`segment_span`）。**别把上游的句子直接当最终 cue**——
+  那样「每行最多几个字」在完整版上是摆设。
 
 ## 3. 标点 — ct-punc
 

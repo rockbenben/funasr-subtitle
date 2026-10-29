@@ -1,4 +1,6 @@
 """自然语句切分 + 时间戳分配单测。"""
+import itertools
+
 from app.schemas import Segment
 from app.subtitle.segmentation import (
     enforce_monotonic,
@@ -209,3 +211,46 @@ def test_single_sentence_keeps_span():
 
 def test_empty_text():
     assert segment_span("   ", 0, 1000) == []
+
+
+# ---- 断句依据只有「标点」和「行宽」（issue #5 的结论）----
+# 说话停顿带来的断句由**上游 VAD 的静音阈值**在更上游完成（语音段就断在那里），
+# 字幕层不再自造第三种依据。engine 层的实测见 test_engine_integration.py。
+
+def _timed_chars(s: str, pitch: int = 60):
+    """造一串带时间的单字 token。"""
+    out = []
+    t = 1000
+    for ch in s:
+        out.append((ch, t))
+        t += pitch
+    return out, t
+
+
+SENT = "先说第一件事然后说第二件"
+
+
+def test_line_break_uses_punctuation_and_width_only():
+    # 12 个字、每行上限 10：字幕层只按标点和行宽断 -> 10 + 2
+    # （停顿断句是上游 VAD 的事，不在这里）
+    pieces, end = _timed_chars(SENT)
+    segs = segment_timed(pieces, end, max_chars=10)
+    assert [s.text for s in segs] == ["先说第一件事然后说第", "二件"]
+
+
+def test_line_break_at_punctuation():
+    # 不控长度时只在句末标点断（逗号不断）
+    pieces, end = _timed_chars("先说第一件事，然后说第二件")
+    assert [s.text for s in segment_timed(pieces, end, max_chars=0)] == ["先说第一件事，然后说第二件"]
+    # 断点优先落在标点后（这里行宽正好到逗号，逗号跟随前句）
+    assert [s.text for s in segment_timed(pieces, end, max_chars=6)] == ["先说第一件事，", "然后说第二件"]
+
+
+def test_line_break_keeps_all_text():
+    pieces, end = _timed_chars(SENT)
+    segs = segment_timed(pieces, end, max_chars=10)
+    assert "".join(s.text for s in segs) == SENT
+    # 时间仍然单调递增
+    for a, b in itertools.pairwise(segs):
+        assert b.start_ms >= a.start_ms
+        assert b.end_ms > b.start_ms

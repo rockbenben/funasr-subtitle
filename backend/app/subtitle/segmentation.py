@@ -214,6 +214,9 @@ def segment_timed(
     pieces: [(token文本, 绝对时间ms), ...]，按时间升序。
     在句子终止标点处断句；句子过长则在次级标点处断。
     每句 start=首 token 时间，end=下一句首 token 时间（末句=span_end_ms）。
+
+    断句依据只有「标点」和「行宽」两种：说话停顿带来的断句由**上游 VAD 的静音阈值**
+    在更上游完成（语音段就断在那里），这里不再自造第三种依据（issue #5 的结论）。
     """
     pieces = [(t, ms) for t, ms in pieces if t]
     if not pieces:

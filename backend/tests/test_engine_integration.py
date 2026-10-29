@@ -85,6 +85,11 @@ def _assert_monotonic(segs):
         prev_end = s.end_ms
 
 
+def _skeleton(text: str) -> str:
+    """只留实义字符（去掉标点与空白），用来比较「只换标点、没丢字」。"""
+    return "".join(ch for ch in text if ch.isalnum())
+
+
 def test_timestamps_strictly_monotonic_zh_and_en():
     """真实音频端到端：所有 cue 必须严格递增、不重叠（enforce_monotonic 兜底）。"""
     from app.engine import build_engine
@@ -100,6 +105,47 @@ def test_timestamps_strictly_monotonic_zh_and_en():
         segs = engine.transcribe(wav, sr, JobOptions(language=lang))
         assert len(segs) >= 1
         _assert_monotonic(segs)
+
+
+def test_pause_split_breaks_at_pause_on_real_audio():
+    """停顿断句（issue #5）：阈值 = 上游 VAD 的静音阈值，说话停下来的地方断成新的一段。
+
+    样本是 TTS 朗读「今天天气非常好，我们一起去公园散步，好不好？这是一个本地语音转写的测试。」
+    ——逗号处约 500ms 停顿、句号处约 1s 停顿。阈值 300ms 时应在这些停顿处断成 3 段。
+    注意：每段独立转写、独立标点，所以段末的逗号会变成句号（上游行为，已知取舍）。
+    """
+    from app.engine import build_engine
+    from app.media import decode_to_16k_mono
+    from app.schemas import JobOptions
+
+    wav, sr = decode_to_16k_mono(FIXTURE)
+    engine = build_engine()
+    engine.load()
+    plain = engine.transcribe(wav, sr, JobOptions(language="zh", max_chars=30))
+    paused = engine.transcribe(wav, sr, JobOptions(language="zh", max_chars=30, pause_ms=300))
+
+    assert len(plain) == 2
+    assert len(paused) == 3
+    # 断点落在停顿处：第一段在逗号处收尾
+    assert "今天天气非常好" in paused[0].text
+    assert paused[0].text.rstrip().endswith("。")
+    # 字没丢（只换了标点）
+    assert _skeleton("".join(s.text for s in plain)) == _skeleton("".join(s.text for s in paused))
+    _assert_monotonic(paused)
+
+
+def test_pause_threshold_off_keeps_default_split():
+    """阈值 0 = 不按停顿断，行为与从前一致。"""
+    from app.engine import build_engine
+    from app.media import decode_to_16k_mono
+    from app.schemas import JobOptions
+
+    wav, sr = decode_to_16k_mono(FIXTURE)
+    engine = build_engine()
+    engine.load()
+    a = engine.transcribe(wav, sr, JobOptions(language="zh", max_chars=30))
+    b = engine.transcribe(wav, sr, JobOptions(language="zh", max_chars=30, pause_ms=0))
+    assert [s.text for s in a] == [s.text for s in b]
 
 
 def test_directml_gpu_if_available():

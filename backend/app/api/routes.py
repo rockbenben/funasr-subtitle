@@ -130,6 +130,7 @@ async def create_job(
     hotwords: str = Form(""),
     use_gpu: str = Form("false"),
     max_chars: int = Form(30),
+    pause_ms: int = Form(0),
     punctuation: str = Form("auto"),
 ):
     mgr = request.app.state.jobs
@@ -163,6 +164,7 @@ async def create_job(
         hotwords=hotwords or "",
         use_gpu=str(use_gpu).lower() in {"true", "1", "yes", "on"},
         max_chars=max(0, min(100, int(max_chars))),
+        pause_ms=max(0, min(5000, int(pause_ms))),
         punctuation=punctuation if punctuation in {"auto", "on", "off"} else "auto",
     )
     job = mgr.create(safe_name, dest, options)

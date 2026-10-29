@@ -346,6 +346,7 @@ export default function App() {
   const [diarization, setDiarization] = useState(false);
   const [hotwords, setHotwords] = useState("");
   const [maxChars, setMaxChars] = useState(30);
+  const [pauseMs, setPauseMs] = useState(0);
   const [punctuation, setPunctuation] = useState<"auto" | "on" | "off">("auto");
   const [compute, setCompute] = useState("CPU");
   // DirectML 实测对量化模型比 CPU 慢，已隐藏开关；后端仍保留 use_gpu 能力（默认 false）。
@@ -399,6 +400,7 @@ export default function App() {
     setDiarization(saved.options.diarization);
     setHotwords(saved.options.hotwords);
     setMaxChars(saved.options.max_chars ?? 30);
+    setPauseMs(saved.options.pause_ms ?? 0);
     setPunctuation(saved.options.punctuation ?? "auto");
   }, []);
 
@@ -539,6 +541,7 @@ export default function App() {
         hotwords: hotwords.trim(),
         useGpu,
         maxChars,
+        pauseMs,
         punctuation,
       });
       rememberJob(job_id);
@@ -594,7 +597,7 @@ export default function App() {
         filename: file.name,
         status: "queued",
         percent: 0,
-        options: { model_id: modelId, language, diarization: diarization && diarAvailable, hotwords, use_gpu: useGpu, max_chars: maxChars, punctuation },
+        options: { model_id: modelId, language, diarization: diarization && diarAvailable, hotwords, use_gpu: useGpu, max_chars: maxChars, pause_ms: pauseMs, punctuation },
         segments: [],
         created_at: new Date().toISOString(),
       });
@@ -609,7 +612,7 @@ export default function App() {
       setRunning(false);
       setFetchingModel(false);
     }
-  }, [file, running, modelId, language, diarization, diarAvailable, hotwords, maxChars, punctuation, modelNotDownloaded, clearRunState, loadModels]);
+  }, [file, running, modelId, language, diarization, diarAvailable, hotwords, maxChars, pauseMs, punctuation, modelNotDownloaded, clearRunState, loadModels]);
 
   // 取消：不管后端什么时候确认，界面立刻从「在跑」回到「可重来」，不留半截进度卡。
   const onCancel = useCallback(async () => {
@@ -788,6 +791,19 @@ export default function App() {
                     max={100}
                     value={maxChars}
                     onChange={(v) => setMaxChars((prev) => (v == null ? prev : v))}
+                    style={{ width: "100%" }}
+                  />
+                </Flex>
+                <Flex vertical gap={8} style={{ flex: 1, minWidth: 170, maxWidth: 230 }}>
+                  <Tooltip title="说话停顿超过这个毫秒数时，在这里断句——一句话说完一停，正好分成两行，而不是按字数硬切。填 0 就还是只按字数和标点断（最小 150 毫秒）。注意：断成两段后每段单独转写、单独加标点，所以段末的逗号可能变成句号。">
+                    <FieldLabel hint="0 = 不按停顿断句">停顿超过几毫秒就断</FieldLabel>
+                  </Tooltip>
+                  <InputNumber
+                    min={0}
+                    max={5000}
+                    step={50}
+                    value={pauseMs}
+                    onChange={(v) => setPauseMs((prev) => (v == null ? prev : v))}
                     style={{ width: "100%" }}
                   />
                 </Flex>

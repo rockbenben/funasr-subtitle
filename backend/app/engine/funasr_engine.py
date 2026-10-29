@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..config import PUNC_CHUNK
+from ..config import MIN_PAUSE_MS, PUNC_CHUNK
 from ..models import PUNC_MODEL, VAD_MODEL, ModelManager, get_model
 from ..schemas import JobOptions, Segment
 from ..subtitle import enforce_monotonic, segment_span, segment_timed, strip_terminal_punct
@@ -242,6 +242,10 @@ class FunasrEngine:
         self.opts = opts
         self.manager = manager or ModelManager(Path(opts.models_root))
         self._vad = None
+        self._vads: dict[int, object] = {}  # 静音阈值(ms) -> VAD 实例
+        self._vad_dir = ""
+        self._vad_device_id = "-1"
+        self._vad_threads = 4
         self._asr = None
         self._punc = None
         self._loaded = False
@@ -252,6 +256,28 @@ class FunasrEngine:
         self.max_chars = 30  # 默认上限（仅 transcribe 未带 options 时的兜底）
 
     # ---- 加载 ----
+    def _vad_for(self, silence_ms: int):
+        """按「静音阈值」取 VAD 实例（阈值 0 = 用默认实例）。
+
+        上游 funasr-onnx 的 `Fsmn_vad` 带 `max_end_sil` 参数（默认取 config 的 800ms）：
+        静默超过这个长度就把语音断成新的一段。**停顿断句（issue #5）就用这个上游参数实现**
+        ——不在字幕层另造一套断句规则，所有模型/后端的断法因此一致。
+
+        模型只有 2MB，按阈值各建一个实例缓存住即可（同一阈值只建一次）。
+        """
+        if silence_ms <= 0:
+            return self._vad
+        vad = self._vads.get(silence_ms)
+        if vad is None:
+            funasr_onnx = _ensure_funasr()
+            vad = funasr_onnx.Fsmn_vad(
+                self._vad_dir, quantize=True, device_id=self._vad_device_id,
+                intra_op_num_threads=self._vad_threads,
+                max_end_sil=max(silence_ms, MIN_PAUSE_MS),
+            )
+            self._vads[silence_ms] = vad
+        return vad
+
     def load(self) -> None:
         if self._loaded:
             return
@@ -270,6 +296,9 @@ class FunasrEngine:
         self._vad = funasr_onnx.Fsmn_vad(
             vad_dir, quantize=True, device_id=device_id, intra_op_num_threads=threads
         )
+        self._vad_dir = vad_dir
+        self._vad_device_id = device_id
+        self._vad_threads = threads
         # 按引擎类型实例化 ASR
         if self._engine_kind == "paraformer":
             self._asr = funasr_onnx.Paraformer(
@@ -316,7 +345,10 @@ class FunasrEngine:
 
         # 1) VAD -> [[start_ms, end_ms], ...]
         report("vad", 0.0)
-        vad_out = self._vad(wav)
+        # 停顿断句（issue #5）：静音阈值 >0 时改用上游 VAD 的 max_end_sil，
+        # 说话停超过这个长度就断成新的语音段（每段独立转写、独立标点）。
+        vad = self._vad_for(options.pause_ms)
+        vad_out = vad(wav)
         spans = vad_out[0] if vad_out else []
         if not spans:
             # 没切出语音：把整段作为一个片段兜底

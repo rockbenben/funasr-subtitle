@@ -48,6 +48,27 @@ def test_models_contract(client):
         assert {"id", "name", "task", "size_mb", "downloaded"} <= set(m)
 
 
+def test_create_job_accepts_pause_ms(client):
+    """停顿阈值要能随任务带进来（0=不按停顿断，是默认值）。"""
+    files = {"file": ("a.wav", b"RIFFfake", "audio/wav")}
+    r = client.post("/api/jobs", files=files, data={"pause_ms": "300", "max_chars": "12"})
+    assert r.status_code == 200
+    job_id = r.json()["job_id"]
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["options"]["pause_ms"] == 300
+    assert job["options"]["max_chars"] == 12
+
+
+def test_create_job_clamps_pause_ms(client):
+    """非法值要夹到合法范围，不能把接口搞崩。"""
+    files = {"file": ("a.wav", b"RIFFfake", "audio/wav")}
+    r = client.post("/api/jobs", files=files, data={"pause_ms": "-5"})
+    assert r.status_code == 200
+    job_id = r.json()["job_id"]
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["options"]["pause_ms"] == 0
+
+
 def test_models_full_backend_contract(client, monkeypatch):
     """完整版：模型面板必须按 pt 模型（ASR+VAD+punc）判断，不能拿 onnx 的体积/状态充数。"""
     import app.engine as engine

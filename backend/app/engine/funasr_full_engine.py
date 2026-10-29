@@ -19,7 +19,7 @@ import re
 
 import numpy as np
 
-from ..config import model_cache_dir
+from ..config import MIN_PAUSE_MS, model_cache_dir
 from ..models import ModelManager, get_model
 from ..schemas import JobOptions, Segment
 from ..subtitle import (
@@ -165,10 +165,16 @@ class FunasrFullEngine:
             progress("asr", 10.0)
         lang = options.language if options.language in _VALID_LANGS else "auto"
         gen = dict(input=wav, cache={}, language=lang, use_itn=True, batch_size_s=300)
-        # sentence_timestamp 仅对「带时间戳 + 走 punc」的模型（如 Paraformer）开；
-        # SenseVoice 无 token 时间戳，开了会 KeyError，关掉走文本切句兜底。
-        if not self._builtin_punc:
-            gen["sentence_timestamp"] = True
+        # sentence_timestamp：两种模型都要开。
+        # - 带时间戳头的（Paraformer）：上游按标点切句并给每句真实起止时间；
+        # - 不带的（SenseVoice）：上游退化成「VAD 段 = 一句」（auto_model._vad_segment_sentences），
+        #   也就是说话停下来的地方自然断句——这正是我们要的，比「整段按字数比例分时间」准得多。
+        #   （实测 funasr 1.4.16 对 SenseVoice 也能开，不会报错。）
+        gen["sentence_timestamp"] = True
+        # 停顿断句（issue #5）：上游 VAD 的静音阈值。传显式值会关掉上游的动态静音调度，
+        # 改成固定阈值——静默超过这个长度就断成新的语音段（上游参数，不动模型逻辑）。
+        if options.pause_ms > 0:
+            gen["max_end_silence_time"] = max(options.pause_ms, MIN_PAUSE_MS)
         if options.hotwords:
             gen["hotword"] = options.hotwords
         res = self._model.generate(**gen)
@@ -239,11 +245,14 @@ class FunasrFullEngine:
                 raw = self._recover_dropped_tail(raw, r0, total_ms)
                 if not (max_chars and max_chars > 0):
                     raw = _merge_to_terminal(raw)
-                return [
-                    Segment(start_ms=st, end_ms=en, text=tx,
-                            speaker=f"spk{spk}" if spk is not None else None)
-                    for st, en, tx, spk in raw
-                ]
+                # 上游不管行长（那是字幕需求），所以每句还要按「每行最多几个字」再拆一刀；
+                # 拆出来的每一行仍用这句的真实起止时间，按字数比例分配到句内。
+                segs: list[Segment] = []
+                for st, en, tx, spk in raw:
+                    for piece in segment_span(tx, st, en, max_chars=max_chars):
+                        piece.speaker = f"spk{spk}" if spk is not None else None
+                        segs.append(piece)
+                return segs
 
         # 2) 词/字级时间戳：timestamp=[[s,e],...] 对齐 text -> 复用 segment_timed
         text = _SPECIAL.sub("", str(r0.get("text", ""))).strip() if isinstance(r0, dict) else ""

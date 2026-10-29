@@ -63,6 +63,12 @@
 - FastAPI 的 `File()` / `Form()` 必须写在参数默认值里（依赖注入靠读签名），挪进函数体表单就失效。
 - 引擎缓存键是 `(model_id, use_gpu, diarization)`，LRU 上限 `ENGINE_CACHE_SIZE`；**淘汰安全的前提是任务由单个 worker 线程串行执行**。加并发 worker 会让「淘汰掉正在用的引擎」变成真 bug。
 - 单条字幕 ≤ `MAX_CUE_MS`（7s）只在有逐 token 时间时才真正卡得住；比例分配时间的路径没有这个能力。
+- 切句参数 `max_chars` / `pause_ms` 走 `JobOptions`。`pause_ms` 默认 **0（关闭）**，改成非 0 会
+  改变所有人的断行结果，别顺手改默认值；它的实现是**上游 VAD 的静音阈值**（静默超过这个长度就
+  断成新语音段），不是字幕层自造的规则——各后端怎么接见
+  [backend/app/engine/README.md](backend/app/engine/README.md)。
+- 完整版（torch）走上游 `AutoModel`：`sentence_info` 给句级时间戳，**「每行最多几个字」由我们
+  自己补上**（上游不管行长）；别把上游的句子直接当最终 cue。
 - 导出文件名走 RFC 5987：中文名只进 `filename*`，另给 ASCII 回退。
 - 引擎的 `use_gpu` 语义**随后端变**：onnx 是 DirectML（前端开关恒 false）；full **完全不看这个值**，由后端自己按 `torch.cuda.is_available()` 决定，`FUNASR_SUBTITLE_FORCE_CPU=1` 可强制 CPU。
 
