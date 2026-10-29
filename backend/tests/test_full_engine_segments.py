@@ -70,3 +70,44 @@ def test_no_width_limit_keeps_upstream_sentences_merged_to_terminal():
     }]
     segs = _segs(res, max_chars=0, total_ms=3000)
     assert [s.text for s in segs] == ["第一句，第二句。", "第三句。"]
+
+
+# ---- 上游 output_timestamp 的逐字时间戳（完整版 SenseVoice 靠它拿到真实时间）----
+# 上游给 words（与正文同序的词/字）+ timestamp（每个词的起止毫秒）。
+
+
+def test_per_token_timestamps_give_real_times():
+    """有逐字时间戳就用它：时间来自 token，不再按字数比例摊到整段音频。"""
+    text = "你好。世界。"
+    words = list(text)
+    ts = [[100 + 100 * i, 180 + 100 * i] for i in range(len(words))]
+    res = [{"text": f"<|zh|><|NEUTRAL|><|Speech|><|withitn|>{text}", "words": words, "timestamp": ts}]
+    segs = _segs(res, max_chars=30, total_ms=10000)
+    assert [s.text for s in segs] == ["你好。", "世界。"]
+    # 每条的 start = 该条第一个 token 的时间；end = 下一条第一个 token 的时间
+    # （末条延伸到音频结束）——都是真时间，不按字数摊。
+    assert (segs[0].start_ms, segs[0].end_ms) == (100, 400)
+    assert (segs[1].start_ms, segs[1].end_ms) == (400, 10000)
+
+
+def test_per_token_alignment_keeps_english_spaces():
+    """英文的 words 是词级（不含空格），对齐后正文里的空格不能丢。"""
+    text = "hello world"
+    words = ["hello", "world"]
+    ts = [[0, 500], [600, 1000]]
+    res = [{"text": text, "words": words, "timestamp": ts}]
+    segs = _segs(res, max_chars=30, total_ms=1000)
+    assert [s.text for s in segs] == ["hello world"]
+    assert segs[0].start_ms == 0
+
+
+def test_per_token_alignment_failure_falls_back():
+    """词对不上正文时不能瞎配：退回按比例分配那条路。"""
+    res = [{
+        "text": "你好世界",
+        "words": ["不", "一", "样"],
+        "timestamp": [[0, 100], [100, 200], [200, 300]],
+    }]
+    eng = FunasrFullEngine.__new__(FunasrFullEngine)
+    assert eng._per_token_pieces(res[0]) is None
+

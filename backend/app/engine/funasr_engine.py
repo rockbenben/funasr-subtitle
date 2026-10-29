@@ -2,18 +2,23 @@
 
 §17 验证结论（详见 engine/README.md）：
 - ASR 默认 = iic/SenseVoiceSmall-onnx 的 model_quant.onnx（torch-free）。
-  · funasr-onnx 的 SenseVoiceSmall 顶部 `import torch`，但 torch 只在其 __call__ 的
-    CTC 贪心解码里用到；我们绕过 __call__，用纯 numpy 解码，运行时无需 torch。
+  · 当前 funasr-onnx 0.4.3 的 SenseVoiceSmall 已不 import torch（CTC 解码改成 numpy），
+    整个包可以在没有 torch 的环境里 import；但它的 __call__ 只给文本不给时间戳，
+    我们仍然绕过 __call__，自己用 numpy 解 CTC 并记下每个 token 的首现帧号。
   · 文本前带特殊标记 <|lang|><|emo|><|event|><|itn|>，需剥离。
-  · 时间戳：funasr-onnx 自己不给，靠 CTC 帧位置反推——去掉前 4 个前缀帧后约 60ms/帧，
-    线性映射到所在 VAD 段的 [start_ms,end_ms]，得到**逐 token** 时间（_sensevoice_timed）。
+  · 时间戳：靠 CTC 帧位置反推，换算用**上游同一套公式**（帧号*60ms-30ms，半帧居中），
+    不要把整段语音线性拉伸到 VAD 段长——那样静音空档的时长会被缩放，
+    「按停顿断句」的毫秒阈值就不准了（_sensevoice_timed）。
     逐 token 时间才有「同一 VAD 段里多句各自定位」的精度（只按 VAD 段给时间会切得太粗）。
 - VAD = fsmn-vad onnx（仅含 model_quant.onnx -> quantize=True），输出 [[start_ms,end_ms],...]，
   负责圈出「哪里在说话」，不产文本。
 - punc = ct-punc onnx（仅含 model_quant.onnx -> quantize=True）：默认模型 SenseVoice 自带
   标点（builtin_punc），**不加载** ct-punc；只有 Paraformer 这类不自带标点的模型才用，
-  且是遇到无标点文本时才懒加载。
+  且是遇到无标点文本时才懒加载。上游 0.4.3 的 ct-punc 内部按 20 token 分块，
+  长文本整段都会加标点，我们不用再自己分块。
 - torch-stub 必须在 modelscope 完成初始化、且 scipy/librosa 已 torch-free 导入之后再安装。
+  （它防的是「用户 venv 里装了真 torch」时 modelscope 探测到 torch 后崩那条老路，
+  与 funasr-onnx 本身要不要 torch 无关。）
 """
 from __future__ import annotations
 
@@ -25,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..config import MIN_PAUSE_MS, PUNC_CHUNK
+from ..config import MIN_PAUSE_MS
 from ..models import PUNC_MODEL, VAD_MODEL, ModelManager, get_model
 from ..schemas import JobOptions, Segment
 from ..subtitle import enforce_monotonic, segment_span, segment_timed, strip_terminal_punct
@@ -415,9 +420,14 @@ class FunasrEngine:
         report("assembling", 100.0)
         return enforce_monotonic(segments)
 
-    _PUNC_CHUNK = PUNC_CHUNK  # ct-punc 对超长输入只在结尾加标点；按此长度分块（可配置）
-
     def _punctuate(self, text: str) -> str:
+        """给一段无标点文本加标点。
+
+        长文本**不用我们自己分块**：上游 funasr-onnx 的 `CT_Transformer.__call__`
+        内部就按 20 token 分块逐块加标点（`split_size=20`），整段都能标上——
+        早先「ct-punc 对超长输入只在结尾加标点」的问题在 funasr-onnx 0.4.3 已经没有了
+        （我们当时的 110 字分块反而会把句子切碎）。pyproject 的下限已经是 0.4.3 ✓。
+        """
         try:
             if self._punc is None:  # 懒加载 ct-punc（SenseVoice 默认不预载，遇到无标点文本才下载）
                 import funasr_onnx
@@ -425,22 +435,7 @@ class FunasrEngine:
                 self._punc = funasr_onnx.CT_Transformer(
                     punc_dir, quantize=True, device_id="-1",
                     intra_op_num_threads=self.opts.num_threads or 4)
-            if len(text) <= self._PUNC_CHUNK + 30:
-                return self._punc_once(text)
-            # 长文本分块（在空格处回退，CJK 直接按长度）逐块标点，再拼接
-            parts: list[str] = []
-            i, n = 0, len(text)
-            while i < n:
-                end = min(n, i + self._PUNC_CHUNK)
-                if end < n:
-                    sp = text.rfind(" ", i, end)
-                    if sp > i:
-                        end = sp
-                chunk = text[i:end].strip()
-                if chunk:
-                    parts.append(self._punc_once(chunk))
-                i = end
-            return " ".join(parts)
+            return self._punc_once(text)
         except Exception:  # noqa: BLE001  # 标点失败/下载失败不致命，保留原文
             return text  # 标点失败/下载失败不致命，保留原文
 
@@ -461,6 +456,9 @@ class FunasrEngine:
 
     # SenseVoice 编码器前置 4 个特殊 token（语言/情感/事件/ITN），其后才是语音帧
     _SV_PREFIX_FRAMES = 4
+    # 语音帧长（毫秒）：上游 sense_voice 用的同一个常数（`frame * 60 - 30`）。
+    # 实测本仓库这批 onnx 权重也是 ≈60ms/帧（见 engine/README.md）。
+    _SV_FRAME_MS = 60
 
     def _sensevoice_timed(
         self, chunk: np.ndarray, language: str, span_start_ms: int, span_end_ms: int,
@@ -486,9 +484,6 @@ class FunasrEngine:
         # 用 sentencepiece 的 piece（带 ▁ 词边界）重建文本，保留英文/混合的空格。
         # 不能用 decode([单 token])：那样会丢掉词间空格（▁ 的去标记是整序列上下文相关的）。
         sp = asr.tokenizer.sp
-        prefix = self._SV_PREFIX_FRAMES
-        speech_frames = max(1, T - prefix)
-        span = max(0, span_end_ms - span_start_ms)
         out: list[tuple[str, int]] = []
         for tok_id, frame in pairs:
             raw = sp.id_to_piece(int(tok_id))
@@ -497,7 +492,10 @@ class FunasrEngine:
             piece = raw.replace("▁", " ")  # ▁ -> 空格（CJK 无 ▁，自然紧贴）
             if not piece:
                 continue
-            rel = (frame - prefix) / speech_frames
-            rel = 0.0 if rel < 0 else (1.0 if rel > 1 else rel)
-            out.append((piece, int(span_start_ms + rel * span)))
+            # 帧位 -> 绝对毫秒，用**上游同一套公式**（funasr/models/sense_voice/model.py:1067）：
+            # 帧号 * 60ms - 30ms（半帧居中）。不要把整段语音线性拉伸到 VAD 段长——
+            # 那样静音空档的时长会被缩放，按停顿断句的毫秒阈值就不准了。
+            # 帧号含前置的 4 个特殊帧（_SV_PREFIX_FRAMES），所以第一个字落在段首 +210ms 左右。
+            t = span_start_ms + max(frame * self._SV_FRAME_MS - self._SV_FRAME_MS // 2, 0)
+            out.append((piece, int(min(t, span_end_ms))))
         return out

@@ -79,8 +79,6 @@ MAX_JOBS = _env_int("MAX_JOBS", 50)
 ENGINE_CACHE_SIZE = max(1, _env_int("ENGINE_CACHE_SIZE", 2))
 # onnxruntime 线程数（0=onnxruntime 默认）
 NUM_THREADS = _env_int("NUM_THREADS", 4)
-# ct-punc 长文本分块长度
-PUNC_CHUNK = _env_int("PUNC_CHUNK", 110)
 
 
 def data_dir() -> Path:

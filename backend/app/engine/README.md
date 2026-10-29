@@ -45,17 +45,29 @@ onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37
     funasr-onnx 遇到缺 onnx 会尝试 `from funasr import AutoModel` 在线导出（需 torch+funasr）——我们不走这条路。
   - ⚠️ onnx 仓库**缺 `chn_jpn_yue_eng_ko_spectok.bpe.model`**（分词器需要），
     需从 pt 仓库用 `allow_file_pattern=[bpe]` 单独补一份（见 `models/manager.py:_fetch_aux_files`）。
-- **torch 依赖**：`sensevoice_bin.py` 顶部 `import torch`，但 torch 仅在其 `__call__` 的
-  CTC 贪心解码用到。我们**绕过 `__call__`**，直接用其 `extract_feat / read_tags(_get_lid/_get_tnid) / infer`，
-  CTC 解码改用**纯 numpy**（argmax → 去连续重复 → 去 blank=0）。运行时无需 torch。
-- **时间戳**：funasr-onnx 的 SenseVoice `__call__` **不直接给时间戳**，但 CTC logits 的
-  **帧位置可推出 token 时间**：实测去掉前 4 个特殊前缀帧后，语音帧 ≈ **60ms/帧**且稳定。
-  我们在 numpy CTC 解码时保留每个 token 的首现帧号（`_ctc_greedy_with_frames`），
-  线性映射到 VAD 段的 [start,end]，得到逐 token 时间戳，再在标点处切自然语句
-  （`subtitle.segment_timed`）。这比「整段用 VAD 边界」精确：能裁掉前导静音、
-  并把同一 VAD 段内的多句各自定位（解决「切分太粗糙」）。
+- **torch 依赖**：**当前 funasr-onnx（0.4.3）已经不 import torch 了**——它的 CTC 贪心解码
+  改成了 numpy（`np.diff`/`np.where`，见 `sensevoice_bin.py:191-198`），整个包可以在没有 torch 的
+  环境里 import（我们 .venv 里就没装 torch，实测 `import funasr_onnx` 直接成功）。
+  我们仍然**绕过 `__call__`**：它只返回文本，不给帧位，我们要的是**逐 token 时间**。
+  自己用 numpy 解 CTC（argmax → 去连续重复 → 去 blank=0），并额外记下每个 token 的首现帧号
+  （`_ctc_greedy_with_frames`）。
+  ⚠️ `app/engine/funasr_engine.py:_ensure_funasr()` 里的 **torch-stub 仍然保留**：
+  它防的是「用户 venv 里装了真 torch」时 modelscope/scipy 探测到 torch 后崩掉那条老路
+  （见本文 §4），与 funasr-onnx 本身要不要 torch 无关。
+- **时间戳（onnx 路径）**：funasr-onnx 的 `__call__` 只给文本不给时间戳，但 CTC logits 的
+  **帧位置能推出 token 时间**。换算用**上游同一套公式**（`funasr/models/sense_voice/model.py:1067`）：
+  `毫秒 = 帧号 * 60 - 30`（半帧居中；帧长 60ms 是上游写死的常数，实测本仓库这批权重也一样）。
+  ⚠️ 不要把整段语音**线性拉伸**到 VAD 段长——那样静音空档的时长会被缩放，
+  「按停顿断句」的毫秒阈值就不准了（实测同一段音频，空档从被缩放的 461ms 变回真实的 670ms）。
+  逐 token 时间戳拿到后在标点处切自然语句（`subtitle.segment_timed`），
+  这比「整段用 VAD 边界」精确：能裁掉前导静音、并把同一 VAD 段内的多句各自定位。
   Paraformer 路径无逐 token 时间 → 退回按字数比例分配（`segment_span`）。
-  （这是 onnx 后端；完整版 torch 后端用 funasr 的 `sentence_info` 给 Paraformer 句级时间戳。）
+- **时间戳（完整版 torch 路径）**：上游 `generate(output_timestamp=True)` 直接给逐字起止毫秒
+  （SenseVoice 也能给，`funasr/models/sense_voice/model.py:1036-1075`，同样是 60ms/帧）。
+  我们用它重建「带时间的 token」再切句（`funasr_full_engine._per_token_pieces`），
+  时间不再按字数比例摊到整段音频上。
+  ⚠️ 开了 `output_timestamp` 之后，上游对「没有 punc 模型」的句子切分会跳过（它要求 punc_model），
+  所以 sentence_info 会变空——完整版 SenseVoice 走的是我们自己的逐字路径，不是 sentence_info。
 - **停顿断句（issue #5）用上游 VAD 的静音阈值实现，不在字幕层自造规则**：
   说话停下来的地方本来就会被 VAD 切成新的语音段，我们只是把「静默多久算一段」调小。
   - onnx：`Fsmn_vad(..., max_end_sil=pause_ms)`（上游参数，默认取 config 的 800ms）；
@@ -99,20 +111,30 @@ onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37
 ## 2.1 完整版（torch 后端）怎么接上游
 
 完整版直接用上游 `funasr.AutoModel`（一条管线：VAD → ASR → 标点 → 切句 → 说话人），
-我们只做两件事：
+我们只做三件事：
 
+- **逐字时间戳**：`generate(output_timestamp=True)` → 上游给 `words`（与正文同序的词/字）
+  和 `timestamp`（每个词的起止毫秒，60ms/帧）。SenseVoice 也能给（它没有 timestamp 头，
+  但上游能按帧反推）。我们把它还原成「带时间的 token」再切句
+  （`funasr_full_engine._per_token_pieces`），时间不再按字数比例摊到整段音频上。
 - **句级时间戳**：`generate(sentence_timestamp=True)`。上游两种情况都处理好了——
   带时间戳头的模型（Paraformer）按标点切句并给每句真实起止；SenseVoice 没有字级时间戳，
   上游退化成「**VAD 段 = 一句**」（`auto_model._vad_segment_sentences`）。
   实测 funasr 1.4.16 对 SenseVoice 也能开，不会报错（旧注释说「会 KeyError」已过时）。
+  ⚠️ 但开了 `output_timestamp` 之后，上游对「没有 punc 模型」的句子切分会跳过（它要求
+  punc_model），sentence_info 会变空——完整版 SenseVoice 因此走我们自己的逐字路径。
+  带说话人时仍以 sentence_info 为准（speaker 只有它有）。
 - **每行字数上限**：上游不管行长（那是字幕需求），所以我们再按 `max_chars` 拆一刀，
   拆出来的行仍用这句的真实起止时间（`segment_span`）。**别把上游的句子直接当最终 cue**——
-  那样「每行最多几个字」在完整版上是摆设。
+  这样「每行最多几个字」在完整版上才是摆设。
 
 ## 3. 标点 — ct-punc
 
 - **ONNX 来源**：`iic/punc_ct-transformer_zh-cn-common-vocab272727-onnx`，**只含 `model_quant.onnx`** → `quantize=True`。
 - **API**：`CT_Transformer(dir, quantize=True)("无标点文本")` → `("有标点文本", [punc_id...])`。实测中文标点正确。
+- **长文本**：上游 0.4.3 的 `__call__` **内部按 20 token 分块**逐块加标点（`split_size=20`），
+  整段都会标上（实测 268 字的长句前 3/4 里有 15 个逗号）。我们**不用再自己分块**
+  ——早先「ct-punc 只在结尾加标点」的问题已经没有了，自己按 110 字硬切反而会把句子切碎。
 - 默认 SenseVoice 路径用不到（builtin_punc）；保留给 Paraformer 等不自带标点的 ASR。
 
 ## 4. torch-stub 与 modelscope/scipy 的共存陷阱（重要）

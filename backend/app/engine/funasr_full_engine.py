@@ -171,6 +171,13 @@ class FunasrFullEngine:
         #   也就是说话停下来的地方自然断句——这正是我们要的，比「整段按字数比例分时间」准得多。
         #   （实测 funasr 1.4.16 对 SenseVoice 也能开，不会报错。）
         gen["sentence_timestamp"] = True
+        # 逐字时间戳（上游 output_timestamp）：SenseVoice 也能给逐字起止时间（上游按 60ms/帧
+        # 算，和 onnx 路径实测的帧率一致）。比「整段按字数比例摊时间」准一个档——
+        # 上游 SenseVoice 没有 timestamp 头，之前只能退化成「VAD 段 = 一句」。
+        # 注意：开了它之后上游对「没有 punc 模型」的句子切分会跳过（要求 punc_model），
+        # 所以 sentence_info 会变空——我们改用自己的逐字路径拼句，见 _per_token_pieces。
+        if self._builtin_punc:
+            gen["output_timestamp"] = True
         # 停顿断句（issue #5）：上游 VAD 的静音阈值。传显式值会关掉上游的动态静音调度，
         # 改成固定阈值——静默超过这个长度就断成新的语音段（上游参数，不动模型逻辑）。
         if options.pause_ms > 0:
@@ -225,6 +232,44 @@ class FunasrFullEngine:
         raw.append([last_end, total_ms, tail, raw[-1][3]])
         return raw
 
+    @staticmethod
+    def _per_token_pieces(r0) -> list[tuple[str, int]] | None:
+        """从上游的逐字时间戳还原「带时间的 token」，对不上就返回 None。
+
+        上游 `output_timestamp=True` 会给出 `words`（与正文同序的词/字）和
+        `timestamp`（每个词的起止毫秒）。这里按「把 words 依次贴回正文」的方式对齐：
+        中文是字级（一个词一个字），英文是词级（词里含空格），所以不能按字符数硬配。
+
+        对不上（上游没给、时间戳个数不符、词在正文里找不到）就返回 None，
+        交给 sentence_info / 比例分配那条路兜底。
+        """
+        if not isinstance(r0, dict):
+            return None
+        ts = r0.get("timestamp")
+        words = r0.get("words")
+        text = _SPECIAL.sub("", str(r0.get("text", ""))).strip()
+        if not ts or not words or len(ts) != len(words) or not text:
+            return None
+        pieces: list[tuple[str, int]] = []
+        pos = 0
+        for w, span in zip(words, ts, strict=True):
+            w = str(w)
+            if not w:
+                return None
+            idx = text.find(w, pos)
+            if idx < 0:
+                return None
+            pieces.append((text[pos:idx + len(w)], int(span[0])))
+            pos = idx + len(w)
+        tail = text[pos:]
+        if tail:
+            # 末尾多出来的（多半是标点）跟着最后一段走
+            if not pieces:
+                return None
+            last_text, last_t = pieces[-1]
+            pieces[-1] = (last_text + tail, last_t)
+        return pieces
+
     def _to_segments(self, res, options: JobOptions, total_ms: int) -> list[Segment]:
         if not res:
             return []
@@ -254,7 +299,14 @@ class FunasrFullEngine:
                         segs.append(piece)
                 return segs
 
-        # 2) 词/字级时间戳：timestamp=[[s,e],...] 对齐 text -> 复用 segment_timed
+        # 2) 逐字时间戳：上游 output_timestamp=True 给的 words + timestamp。
+        #    SenseVoice 走这条（上游没有 timestamp 头，但能按 60ms/帧反推），
+        #    时间是真的，不用再按字数比例摊。
+        pieces = self._per_token_pieces(r0)
+        if pieces:
+            return segment_timed(pieces, total_ms, max_chars=max_chars)
+
+        # 3) 词/字级时间戳：timestamp=[[s,e],...] 对齐 text -> 复用 segment_timed
         text = _SPECIAL.sub("", str(r0.get("text", ""))).strip() if isinstance(r0, dict) else ""
         ts = r0.get("timestamp") if isinstance(r0, dict) else None
         if text and ts and len(ts) == len(text.replace(" ", "")):
@@ -268,7 +320,7 @@ class FunasrFullEngine:
                 i += 1
             return segment_timed(pieces, total_ms, max_chars=max_chars)
 
-        # 3) 兜底：只有整段文本 -> 按标点切句 + 比例分配整段时长
+        # 4) 兜底：只有整段文本 -> 按标点切句 + 比例分配整段时长
         if text:
             return segment_span(text, 0, total_ms, max_chars=max_chars)
         return []

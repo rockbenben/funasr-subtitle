@@ -42,6 +42,8 @@
 
 - modelscope 的 logger 用 `find_spec('torch')`，发现 torch 就会 import 真 torch_utils → 崩。
 - scipy / librosa 在 import 期探测 torch。
+- ⚠️ funasr-onnx 0.4.3 **自己已经不 import torch** 了（CTC 解码改成 numpy），stub 现在只为
+  「用户 venv 里装了真 torch」那条老路兜底；别因为「上游不用 torch 了」就顺手删掉它。
 - stub 必须有 `__spec__`（否则 `find_spec` 抛 ValueError）、`__version__`、一个 `Tensor` 占位类。
 - `app/models/manager.py` 是**下载层，必须保持 torch-free**——它只 import modelscope。
 
@@ -69,8 +71,9 @@
   [backend/app/engine/README.md](backend/app/engine/README.md)。
 - `itn`（数字转阿拉伯数字，上游 `use_itn`）默认 **开**；关掉会把「2025年」变回「二〇二五年」，
   同样是会改变所有人输出的默认值，别随手翻。
-- 完整版（torch）走上游 `AutoModel`：`sentence_info` 给句级时间戳，**「每行最多几个字」由我们
-  自己补上**（上游不管行长）；别把上游的句子直接当最终 cue。
+- 完整版（torch）走上游 `AutoModel`：**「每行最多几个字」由我们自己补上**（上游不管行长）；
+  别把上游的句子直接当最终 cue。时间戳优先用上游的逐字时间戳
+  （`output_timestamp=True`，SenseVoice 也有），其次才是 `sentence_info`（句级、带说话人）。
 - 导出文件名走 RFC 5987：中文名只进 `filename*`，另给 ASCII 回退。
 - 引擎的 `use_gpu` 语义**随后端变**：onnx 是 DirectML（前端开关恒 false）；full **完全不看这个值**，由后端自己按 `torch.cuda.is_available()` 决定，`FUNASR_SUBTITLE_FORCE_CPU=1` 可强制 CPU。
 
