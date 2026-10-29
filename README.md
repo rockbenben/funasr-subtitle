@@ -93,6 +93,8 @@
 > 想用命令行：按 [开发](#️-开发) 装好依赖后，`cd backend`，运行
 > `.\.venv\Scripts\python -m app.engine.cli "C:\video\a.mp4" -o "C:\video\a.srt"`。
 > （完整版的依赖装在 `backend\.venv-full` 里，把上面路径换成它即可。）
+> 界面上的设置命令行都有同名开关：`--max-chars`（每行几个字）、`--pause-ms`（停顿多少毫秒就断）、
+> `--no-itn`（数字保留中文原样）、`--punctuation auto|on|off`、`--hotwords "..."`。
 
 ## ⚙️ 工作原理
 
