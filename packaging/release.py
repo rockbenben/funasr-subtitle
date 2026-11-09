@@ -113,7 +113,7 @@ def check_archive(files: list[Path]) -> None:
 def gh(*args: str, missing_ok: bool = False):
     result = subprocess.run(["gh", *args], check=False, capture_output=True, text=True, encoding="utf-8")
     if result.returncode:
-        if missing_ok and "HTTP 404" in result.stderr:
+        if missing_ok and ("HTTP 404" in result.stderr or "release not found" in result.stderr.lower()):
             return None
         raise RuntimeError(f"gh {' '.join(args[:2])} failed: {result.stderr}")
     return result.stdout
@@ -137,7 +137,8 @@ def publish(root: Path, directory: Path, tag: str, sha: str) -> None:
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
         raise ValueError("Invalid GH_REPO")
     marker = f"<!-- funasr-subtitle-ci:{sha} -->"
-    endpoint = f"repos/{repo}/releases/tags/{tag}"
+    endpoint = f"repos/{repo}/releases"
+    query = f'.[] | select(.tag_name == "{tag}")'
 
     def check_tag():
         remote = json.loads(gh("api", f"repos/{repo}/commits/{tag}"))
@@ -145,7 +146,7 @@ def publish(root: Path, directory: Path, tag: str, sha: str) -> None:
             raise ValueError("Release tag moved away from the tested commit")
 
     check_tag()
-    raw = gh("api", endpoint, missing_ok=True)
+    raw = gh("api", endpoint, "--paginate", "--jq", query)
     release = json.loads(raw) if raw else None
     if release and not release["draft"]:
         check_uploaded(files, release["assets"])
@@ -160,7 +161,7 @@ def publish(root: Path, directory: Path, tag: str, sha: str) -> None:
         gh("release", "create", tag, "--verify-tag", "--target", sha, "--draft",
            "--title", tag, "--generate-notes", "--notes", marker)
     gh("release", "upload", tag, *(str(p) for p in files), "--clobber")
-    release = json.loads(gh("api", endpoint))
+    release = json.loads(gh("api", endpoint, "--paginate", "--jq", query))
     check_uploaded(files, release["assets"])
     check_tag()
     gh("release", "edit", tag, "--draft=false", "--verify-tag")

@@ -1,0 +1,58 @@
+name: Retry verified release
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Package Windows run with both packages successful
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_RUN: ${{ inputs.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Validate source build
+        id: source
+        run: |
+          python - <<'PY'
+          import json, os, re, subprocess
+          run = os.environ['SOURCE_RUN']
+          assert re.fullmatch(r'[0-9]+', run)
+          base = f"repos/{os.environ['GH_REPO']}/actions/runs/{run}"
+          def api(path):
+              return json.loads(subprocess.check_output(['gh', 'api', path], text=True))
+          source = api(base)
+          assert source['path'] == '.github/workflows/package.yml'
+          assert source['event'] == 'push' and source['status'] == 'completed'
+          jobs = api(base + '/jobs?per_page=100')['jobs']
+          for name in ('prepare', 'package (onnx)', 'package (full)'):
+              assert any(j['name'] == name and j['conclusion'] == 'success' for j in jobs), name
+          assert re.fullmatch(r'v\d+\.\d+\.\d+', source['head_branch'])
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"tag={source['head_branch']}\nsha={source['head_sha']}\n")
+          PY
+      - uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+          pattern: funasr-subtitle-*-win-x64
+          merge-multiple: true
+          path: release-assets
+      - name: Verify assets and publish
+        env:
+          RELEASE_TAG: ${{ steps.source.outputs.tag }}
+          BUILD_SHA: ${{ steps.source.outputs.sha }}
+        run: python packaging/release.py publish --directory release-assets --tag "$RELEASE_TAG" --sha "$BUILD_SHA"
