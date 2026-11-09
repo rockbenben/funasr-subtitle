@@ -7,8 +7,8 @@
 >
 > 测量环境：Windows 11 x64、Python 3.11。onnx 线的环境**未安装 torch**（这是它能纯 CPU
 > 运行的前提）；full 线的环境装了 torch + CUDA。
-> 依赖版本下限见 `pyproject.toml`（2026-10 已整体抬高），**本文只记验证过的版本**——
-> 某条结论若确实只对特定版本成立，会在该条里就地注明。
+> 依赖版本下限见 `pyproject.toml`（2026-10 已整体抬高，实时转写又把 onnx 线下限抬到 0.4.9），
+> **本文只记验证过的版本**——某条结论若确实只对特定版本成立，会在该条里就地注明。
 > ⚠️ 当前默认装的是**纯 CPU 版 onnxruntime**（DirectML 已被移出依赖，见第 6 节）。
 > 第 1 节的 RTF / 准确率结论在纯 CPU 版上同样成立——那些本来就是 CPU 测量；
 > 只有第 6 节的 DirectML 数据需要额外手动装 `onnxruntime-directml`。
@@ -22,20 +22,27 @@
 
 | 包 | 组件 | 验证版本 | 验证方式 |
 | --- | --- | --- | --- |
-| CPU / onnx | `funasr-onnx` | **0.4.3** | 全量测试（121 个，1 skip = DirectML 未装）+ SenseVoice/Paraformer/热词版三条真实推理路径 |
+| CPU / onnx | `funasr-onnx` | **0.4.9**（本机 `.venv` 里这份的 METADATA 列了上游 #3827/#3831/#3838/#3842/#3846/#3847 等 wrapper 修复；`pyproject.toml` 下限 `>=0.4.9`） | 全量测试（本机收集 173 个，含实时 / CUDA 回退 / 打包闸门；CI 只装 `[dev]` 时真实推理用例 skip）+ SenseVoice / Paraformer / 热词版三条离线真实推理 + Paraformer-online 实时真实推理 |
 | CUDA / full | `funasr` | **1.4.16** | RTX 3080 Ti 上 SenseVoice / Paraformer / cam++ 三条真实推理路径 |
 
-2026-10-27 依赖升级后复核过：推理栈本体版本没变（都还是最新），周边包动了——
-onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37.1 → **1.40.2**。
+2026-10-27 复核过周边包：onnxruntime **1.31.1**、onnx **1.23.2**、modelscope **1.40.2**。
 两条线分别实跑过：onnx 线 numpy 1.26.4，full 线 numpy 2.4.6 + torch 2.5.1+cu121 上跑通 CUDA 推理。
+⚠️ 实时转写把 `funasr-onnx` 下限从 0.4.3 抬到 **0.4.9**（见第 9 节）：短包、空尾包、
+流式缓存、空 punc chunk 都是上游 0.4.4–0.4.9 陆续修的，**降回 0.4.3 会崩**。本文 1./3./6. 节
+的结论在 0.4.9 上复测仍成立（CTC 解码仍 numpy、ct-punc 仍按 20 token 分块）；0.4.3 是
+升 0.4.9 之前的旧验证版本，下面带版本号的条目按「0.4.3 起、0.4.9 仍成立」理解。
 
-**两处 0.4.1 时代的 workaround 在 0.4.3 上依然必需**（升级后没被上游修掉，也因此不能删）：
+**早期记录的两处 workaround：一处按当前 0.4.9 源码已不再必需（保留作保险），另一处仍是硬性必需**：
 
-- `ContextualParaformer.__init__` 仍然不设 `self.language`，加载后必须手动 `asr.language="zh"`（§6）
-- contextual 仓库仍然只有 `model_eb.onnx`，量化路径要的 `model_eb_quant.onnx` 仍需下载后本地复制（§6）
+- `ContextualParaformer.__init__` 在 0.4.9 里**会**读 `config["lang"]` 设 `self.language`（本仓库 config 没有 `lang`，所以是 `None`）。
+  `__call__` 只把 `"en-bpe"` 当英文、其余都走中文后处理，所以手动 `asr.language="zh"` 目前在功能上是 no-op；
+  保留它是防 config 将来带上 `lang: en-bpe` 的保险（§6）。
+- contextual 仓库仍然只有 `model_eb.onnx`，量化路径要的 `model_eb_quant.onnx` 仍需下载后本地复制（§6）——这条不能删。
 
 升 `funasr-onnx` 时注意它声明 `numpy<=1.26.4`，**不要连带升 numpy 2**——这条已写成 `pyproject.toml`
 里 `numpy>=1.26,<2` 的上界，pip 不会再往 onnx 线装 numpy 2。torch 线（`requirements-full.txt`）不受此限。
+升级时顺手确认 `ContextualParaformer` 的 `model_eb_quant.onnx` 是否仍缺、`__init__` 是否仍按 `config["lang"]`
+设 `self.language`（0.4.9 里：前者仍缺、后者已设）。复制逻辑别只因为版本号变了就删。
 
 
 ## 1. SenseVoiceSmall（默认 ASR）
@@ -45,8 +52,8 @@ onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37
     funasr-onnx 遇到缺 onnx 会尝试 `from funasr import AutoModel` 在线导出（需 torch+funasr）——我们不走这条路。
   - ⚠️ onnx 仓库**缺 `chn_jpn_yue_eng_ko_spectok.bpe.model`**（分词器需要），
     需从 pt 仓库用 `allow_file_pattern=[bpe]` 单独补一份（见 `models/manager.py:_fetch_aux_files`）。
-- **torch 依赖**：**当前 funasr-onnx（0.4.3）已经不 import torch 了**——它的 CTC 贪心解码
-  改成了 numpy（`np.diff`/`np.where`，见 `sensevoice_bin.py:191-198`），整个包可以在没有 torch 的
+- **torch 依赖**：**当前 funasr-onnx（0.4.3 起，0.4.9 仍如此）已经不 import torch 了**——它的 CTC 贪心解码
+  改成了 numpy（`np.diff`/`np.where`，见 `sensevoice_bin.py:191-198`；0.4.9 仍是这套），整个包可以在没有 torch 的
   环境里 import（我们 .venv 里就没装 torch，实测 `import funasr_onnx` 直接成功）。
   我们仍然**绕过 `__call__`**：它只返回文本，不给帧位，我们要的是**逐 token 时间**。
   自己用 numpy 解 CTC（argmax → 去连续重复 → 去 blank=0），并额外记下每个 token 的首现帧号
@@ -113,6 +120,14 @@ onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37
 
 ## 2.1 完整版（torch 后端）怎么接上游
 
+CUDA 选择共用 `app/engine/torch_device.py`（文件引擎、实时引擎、`compute_label()` 都调它）：驱动可见后，实际运行一次小张量运算并同步，避免
+`is_available()` 为真、实际报 `no kernel image is available for execution on the device`。
+该错误或 `invalid device function` 会在本次进程禁用 CUDA；文件模型加载或整段推理
+遇到它时用新 CPU 模型重试，推理 cache 也重建。实时模型加载使用相同检查和加载回退。
+强制 CPU 时跳过探测，算力标签跟随实际选择。其他错误（如显存不足）继续上报。
+合同测试模拟驱动可见但内核不支持、异步错误、加载失败和推理失败；不代表已在报错用户的
+显卡上实测。当前随包 torch 版本见第 0 节，不能由 CUDA 可见推断所有 NVIDIA 显卡都受支持。
+
 完整版直接用上游 `funasr.AutoModel`（一条管线：VAD → ASR → 标点 → 切句 → 说话人），
 我们只做三件事：
 
@@ -127,14 +142,17 @@ onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37
   punc_model），sentence_info 会变空——完整版 SenseVoice 因此走我们自己的逐字路径。
   带说话人时仍以 sentence_info 为准（speaker 只有它有）。
 - **每行字数上限**：上游不管行长（那是字幕需求），所以我们再按 `max_chars` 拆一刀，
-  拆出来的行仍用这句的真实起止时间（`segment_span`）。**别把上游的句子直接当最终 cue**——
+  有逐字时间时，文字和对应的词一起拆，每行起止取首末词的真实时间；只有句级时间时才按比例分配。
+  **别把上游的句子直接当最终 cue**——
   这样「每行最多几个字」在完整版上才是摆设。
+  SenseVoice 的末条字幕和末词都取上游的结束时间，不延伸到音频结尾；在测试音频后加 15 秒
+  静音的回归样本用于检查这点。
 
 ## 3. 标点 — ct-punc
 
 - **ONNX 来源**：`iic/punc_ct-transformer_zh-cn-common-vocab272727-onnx`，**只含 `model_quant.onnx`** → `quantize=True`。
 - **API**：`CT_Transformer(dir, quantize=True)("无标点文本")` → `("有标点文本", [punc_id...])`。实测中文标点正确。
-- **长文本**：上游 0.4.3 的 `__call__` **内部按 20 token 分块**逐块加标点（`split_size=20`），
+- **长文本**：上游 0.4.3 起（0.4.9 仍如此）的 `__call__` **内部按 20 token 分块**逐块加标点（`split_size=20`），
   整段都会标上（实测 268 字的长句前 3/4 里有 15 个逗号）。我们**不用再自己分块**
   ——早先「ct-punc 只在结尾加标点」的问题已经没有了，自己按 110 字硬切反而会把句子切碎。
 - 默认 SenseVoice 路径用不到（builtin_punc）；保留给 Paraformer 等不自带标点的 ASR。
@@ -174,12 +192,20 @@ onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37
 
 ### 5.1 两条后端的「模型已就位」判据不同
 
+onnx 下载按钮、就绪判断和文件引擎加载共用 `ModelManager.onnx_parts` 清单。已有 ASR 缓存
+而缺 VAD/punc 时只补缺项；实时模型独立，不带文件转写的辅助模型。SenseVoice 的可选
+ct-punc 兜底只使用已缓存权重，缺失时保留原文，不在转写中触发联网下载。
+
 `/api/models` 的 `downloaded` 与下载面板的完成判定**随当前后端变**：
 
 | 后端 | 判据 | 预置清单 |
 | --- | --- | --- |
-| onnx | 主权重 `model_quant.onnx` + 辅助文件（bpe 词表等）+ 目录内改名产物都在 | ASR(onnx) + VAD(onnx) +（不自带标点时）ct-punc(onnx) |
+| onnx | 预置清单里每个仓库的主权重 `model_quant.onnx` + 辅助文件（bpe 词表等）+ 目录内改名产物都在 | ASR(onnx) + VAD(onnx) +（不自带标点时）ct-punc(onnx) |
 | full | 预置清单里每个仓库都含 `model.pt` + `config.yaml` | ASR(pt) + VAD(pt) +（不自带标点时）ct-punc(pt) |
+
+实时模型是上表的例外：`streaming=True` 时 `onnx_parts` / `_full_parts` 都**只返回本体**（不带 VAD / punc），
+且 onnx 侧还要 `required_files` 里的 `decoder_quant.onnx` / `config.yaml` / `am.mvn` / `tokens.json`
+全在才算就位——它走 online 前端，不挂离线 VAD/标点。
 
 - **cam++ 不在预置清单里**：只有勾了「区分说话人」才用得上，量也不大，让 funasr 在加载
   引擎时自己按需下载。代价是那一刻没有进度可报。
@@ -196,10 +222,11 @@ onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37
     （走 `{"preds":...}` 分支），时间戳仍由 VAD 提供；`preds` 是 `(整句, [逐字])` 元组，取 [0]。
     无标点 → 走 ct-punc。
   - 热词版 `...-contextual...onnx`（quant 871MB + model_eb 25MB）→ `funasr_onnx.ContextualParaformer`，
-    `__call__(wav, hotwords)` 支持热词。两个坑：① quant 路径要 `model_eb_quant.onnx`，
+    `__call__(wav, hotwords)` 支持热词。两个历史注意点：① quant 路径要 `model_eb_quant.onnx`，
     仓库只有 `model_eb.onnx` → 下载后在目录内复制一份（`ModelSpec.local_copies`）；
-    ② funasr-onnx 的 `ContextualParaformer.__init__` 漏设 `self.language`，`__call__` 会读它
-    → 加载后手动 `asr.language="zh"`。（若上游哪天修好了，删掉这行即可。）
+    ② `ContextualParaformer.__init__` 在 0.4.9 里已按 `config["lang"]` 设 `self.language`（本仓库 config 无 `lang` → `None`），
+    `__call__` 只对 `"en-bpe"` 走英文后处理，`None` 与 `"zh"` 同走中文分支。加载后仍显式设 `asr.language="zh"`
+    是防 config 将来带 `lang: en-bpe` 的保险，不是当前必需的补丁。
 - **DirectML（已实现，但默认关闭）**：用 **onnxruntime-directml**（同时提供 CPU+DML）。
   funasr-onnx 的 `OrtInferSession` 只会挂 CUDA/CPU，故用 monkeypatch 把
   `funasr_onnx.utils.utils.InferenceSession` 重定向为 `providers=[Dml, CPU]`
@@ -218,7 +245,7 @@ onnxruntime 1.30.0 → **1.31.1**、onnx 1.21.0 → **1.23.2**、modelscope 1.37
   ② 既然开关已隐藏且实测更慢，没必要默认装它。
   想手动复现本节实验：`pip install --force-reinstall --no-deps onnxruntime-directml`，
   然后确认 `ort.get_available_providers()` 里有 `DmlExecutionProvider`。
-- **diarization（cam++）**：两条后端**都支持**，但走的路不同——
+- **diarization（cam++）**：只有完整版（torch）支持；onnx 线没有可用的说话人分离类。完整版内部——
   - **完整版（full）**：`AutoModel(spk_model="cam++")`，实测可用（RTX 3080 Ti，见第 0 节）。
     只有 Paraformer 系模型能出带 `spk` 的 `sentence_info`，所以 SenseVoice + cam++ 没有意义，
     面板上的开关只对 Paraformer 系亮。cam++ 模型不在预置下载清单里，勾了才现下（见 5.1）。
@@ -278,3 +305,24 @@ timestamp_sentence([1, 3, 1], [[0,100],[100,200],[200,300]], "你 好 世界")
 差异不得补、中间缺段不得猜、时间不够不得硬塞）。
 
 ⚠️ **上游发版后应删掉这段缓解**（届时 `_recover_dropped_tail` 会恒等返回，可直接移除调用点）。
+
+## 9. 实时转写
+
+> 本节是 2026-11 新增的模式；结论来自合同测试 + 本地真实推理 + 浏览器实测，
+> 各条对应代码见 `app/engine/live.py`、`app/api/live.py`、`app/jobs/queue.py`。
+
+实时模式直接接上游的专用 Paraformer-online，不将离线 SenseVoice 按固定秒数反复识别：
+
+- CPU 包：`funasr_onnx.paraformer_online_bin.Paraformer`，`chunk_size=[5,10,5]`，每次传 9600 个 16k 单声道采样（600ms），会话内复用 `param_dict.cache`，停止时显式 `is_final=True`。[上游示例](https://github.com/modelscope/FunASR/blob/main/runtime/python/onnxruntime/demo_paraformer_online.py)。
+- 完整版：`AutoModel(model="paraformer-zh-streaming")`，`generate(input=..., cache=..., is_final=..., chunk_size=[0,10,5], encoder_chunk_look_back=4, decoder_chunk_look_back=1)`。[上游示例](https://github.com/modelscope/FunASR/blob/main/examples/industrial_data_pretraining/paraformer_streaming/demo.py)。
+- ONNX 依赖下限升至 **0.4.9**（`pyproject.toml` 的 `[onnx]` extra）：使用上游已修复的短包、空尾包和流式缓存处理，不在本地复制上游推理代码。本机 `.venv` 里这份 0.4.9 的 METADATA 逐条列了 0.4.4–0.4.9 修的 #3827/#3831/#3838/#3842/#3846/#3847；**降回 0.4.3 会让实时路径崩**。
+- ONNX 仓库为 `iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx`。实查包含 `model_quant.onnx`（166,350,528 字节）、`decoder_quant.onnx`（71,867,274 字节），无需在 CPU 包中导出模型。就绪判定同时检查 decoder、config、词表、CMVN。
+- full 别名对应 `iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online`，本体及词表约 849 MiB；这条接口不挂离线 VAD、标点或 cam++。
+
+浏览器 `public/pcm-capture.js`（AudioWorklet）将麦克风／共享音频混成 16k mono int16 PCM，每 9600 采样（600ms）发一包，经 `/ws/live` 发送；立体声取各声道均值、超范围样本夹到 ±1。每包等上包确认后再发（`chunk` 回包才继续），积压 50 包（约 30 秒）时停止收音并补完；停止时先发不足 600ms 的尾包，再请求上游 final flush。麦克风不接回扬声器（worklet 输出静音），共享画面不发送给后端。共享是否包含音轨由浏览器和来源决定，没有音轨时前端直接报错让用户重选。
+
+流式任务和文件任务共用唯一 worker：`/ws/live` 每个 PCM 包作为一个 `LiveChunk` 入同一队列串行推理，实时会话期间拒绝新文件任务（`409`），有文件任务在跑时也拒绝开实时。开始实时会清空常驻文件引擎缓存以控峰值内存；每次收音独享在线模型前端和 cache，退出后释放。页面断开时 ASGI 协程可能立刻被取消，所以收尾也投一个 `final=True` 的 `LiveChunk`，由 worker 完成 final flush 再释放会话，已识别文字仍保留为可导出的 Job。行宽仍走 `segment_span`；当前行按增量结果替换（`replace_from`），超过 `MAX_CUE_MS`（7s）或 final 才固定旧行，推理 cache 始终连续。在线模型不返回逐字时间：行级时间按收音块估算，`words=None`，不用于精确对轴；Job 会把 `diarization / itn / punctuation / pause_ms / use_gpu` 强制成「未接入」的值，只输出中文文本。
+
+实时字幕阅读视图独立在 `frontend/src/LiveCaptions.tsx`，主页面和小窗通过 React portal 共用同一份字幕状态，不新建录音或推理会话。点击「悬浮显示」直接调用浏览器 Document Picture-in-Picture 置顶，缺失或被禁用时回退普通窗口，弹窗不可用时保留页面内小窗；关闭小窗只移除阅读视图，停止收音仍调用主页面的同一控制器。原生画中画的持续同步、关闭后继续转写、小窗内停止，以及普通窗口回退和离开实时模式时的回收均已在浏览器验证。
+
+本地验证：`sample_zh_numbers.wav` 的 ONNX 与 full 路径均在 final 前持续输出文字，最终含「苹果」「电脑」；浏览器使用该样本作为虚拟麦克风，验证持续出字、停止补尾、导出。合同测试覆盖两个声音来源、独占队列、断线回收、错误保留、缓存与 final 参数；CI 不下载模型，真实推理在本地模型和对应推理栈均已就绪时才执行（`tests/test_live*.py`）。
