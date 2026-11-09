@@ -115,8 +115,8 @@ def test_publish_only_after_every_upload_is_verified(release, assets, monkeypatc
             if failure == "unmanaged_draft":
                 return json.dumps({"draft": True, "body": "user draft", "assets": []})
             if not state["created"]:
-                assert missing_ok
-                return None
+                assert args[1].endswith("/releases") and "--paginate" in args
+                return ""
             remote = _remote_assets(release, assets)
             if failure == "missing_asset":
                 remote.pop()
