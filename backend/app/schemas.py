@@ -86,6 +86,7 @@ class JobError(BaseModel):
 class Job(BaseModel):
     id: str
     filename: str
+    source: Literal["file", "microphone", "system"] = "file"
     status: JobStatus = JobStatus.queued
     percent: float = 0.0  # 0..100
     options: JobOptions = Field(default_factory=JobOptions)
@@ -106,8 +107,9 @@ class ModelInfo(BaseModel):
     id: str
     name: str
     task: str
+    streaming: bool = False
     size_mb: float  # 按后端取：onnx 几百 MB，完整版 0.9–2.1 GB
-    downloaded: bool  # 按后端取：onnx 看 onnx 仓库，完整版看 pt 权重（ASR+VAD+punc）
+    downloaded: bool  # 按后端取：清单内的 ASR/VAD/必要时 punc 均就位；实时模型只看本体
     diarization: bool = False  # 当前后端下该模型是否支持说话人分离（仅完整版 + Paraformer）
 
 

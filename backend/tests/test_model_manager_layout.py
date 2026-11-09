@@ -11,6 +11,7 @@ FileNotFoundError，重试必现，但磁盘上文件都在」。
 """
 from __future__ import annotations
 
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,10 @@ from app.models.registry import (
     FULL_VAD_SIZE_MB,
     PARAFORMER_ZH,
     PARAFORMER_ZH_HOTWORD,
+    PUNC_MODEL,
     SENSEVOICE,
+    STREAMING_PARAFORMER,
+    VAD_MODEL,
 )
 
 BPE = "chn_jpn_yue_eng_ko_spectok.bpe.model"
@@ -225,3 +229,30 @@ def test_full_download_reuses_cached_repo(tmp_path, monkeypatch):
 
     assert [c["repo"] for c in calls] == [FULL_VAD_REPO, FULL_PUNC_REPO]
     assert mgr.full_downloaded(PARAFORMER_ZH.id) is True
+
+
+@pytest.mark.parametrize("spec", [SENSEVOICE, PARAFORMER_ZH])
+def test_onnx_bundle_completes_existing_asr_for_offline_use(tmp_path, monkeypatch, spec):
+    calls = []
+    monkeypatch.setattr(manager_mod, "_snapshot", _fake_snapshot(calls))
+    mgr = ModelManager(root=tmp_path)
+    mgr.download(spec.id)
+    calls.clear()
+    assert not mgr.onnx_downloaded(spec.id)
+    progress = []
+    mgr.download_onnx(spec.id, lambda *args: progress.append(args))
+    expected = [VAD_MODEL.repo] + ([] if spec.builtin_punc else [PUNC_MODEL.repo])
+    assert [c["repo"] for c in calls] == expected
+    assert mgr.onnx_downloaded(spec.id)
+    assert progress[-1][0] == 100
+    assert progress[-1][2] == mgr.onnx_total_mb(spec.id)
+    assert all(a[0] <= b[0] for a, b in pairwise(progress))
+    monkeypatch.setattr(manager_mod, "_snapshot", lambda *a, **kw: pytest.fail("unexpected network"))
+    mgr.download_onnx(spec.id)
+    for part in mgr.onnx_parts(spec.id):
+        assert mgr.ensure_dir(part.id).is_dir()
+
+
+def test_streaming_bundle_needs_no_offline_helpers(tmp_path):
+    mgr = ModelManager(root=tmp_path)
+    assert mgr.onnx_parts(STREAMING_PARAFORMER.id) == [STREAMING_PARAFORMER]

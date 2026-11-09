@@ -49,6 +49,8 @@ import type {
   Stage,
 } from "./types";
 import { STUDIO } from "./theme";
+import { startLive, type LiveHandle, type LiveSource } from "./live";
+import LiveCaptions from "./LiveCaptions";
 
 const { Text } = Typography;
 const EXPORT_FORMATS: ExportFormat[] = ["srt", "vtt", "txt", "json"];
@@ -250,6 +252,12 @@ function ResultsPanel({
   const [copied, setCopied] = useState(false);
   const [showFade, setShowFade] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const followRef = useRef(true);
+  const isLive = !!job.source && job.source !== "file" && job.status !== "done";
+  useEffect(() => {
+    const list = listRef.current;
+    if (isLive && list && followRef.current) list.scrollTop = list.scrollHeight;
+  }, [isLive, job.segments.length]);
   const fullText = useMemo(() => job.segments.map((s) => s.text).join("\n"), [job.segments]);
 
   // ---- 点句试听：转写完当场确认断句位置对不对、时间轴准不准 ----
@@ -365,7 +373,8 @@ function ResultsPanel({
       </Flex>
       {restored && (
         <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 6 }}>
-          已恢复上次的字幕结果（{job.filename}）。原文件不会保留，重新转写请重新选择文件。
+          已恢复上次的字幕结果（{job.filename}）。{job.source && job.source !== "file"
+            ? "录音不会保留，需要继续收音请重新开始。" : "原文件不会保留，重新转写请重新选择文件。"}
         </Text>
       )}
       <Text type="secondary" style={{ fontSize: 12 }}>
@@ -380,12 +389,18 @@ function ResultsPanel({
       <audio ref={audioRef} src={audioUrl ?? undefined} preload="metadata" style={{ display: "none" }} />
       <div
         ref={listRef}
+        onScroll={(event) => {
+          const list = event.currentTarget;
+          followRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+        }}
         className={showFade ? "scroll-fade" : undefined}
         style={{ marginTop: 12, maxHeight: 420, overflow: "auto", paddingRight: 6 }}
       >
         {job.segments.length === 0 ? (
           <Text type="secondary">
-            没听到人声。可能是纯音乐、静音，或者这个文件没有音轨。换个文件再试。
+            {job.source && job.source !== "file"
+              ? job.status === "done" ? "这次没有识别到人声，请检查声音来源后重试。" : "字幕会在收音后分段出现，请稍候。"
+              : "没听到人声。可能是纯音乐、静音，或者这个文件没有音轨。换个文件再试。"}
           </Text>
         ) : (
           job.segments.map((seg: Segment, i) => (
@@ -427,6 +442,10 @@ export default function App() {
   const [modelsError, setModelsError] = useState<string | null>(null);
 
   const [file, setFile] = useState<File | null>(null);
+  const [source, setSource] = useState<"file" | LiveSource>("file");
+  const [liveState, setLiveState] = useState<"idle" | "starting" | "recording" | "stopping">("idle");
+  const liveRef = useRef<LiveHandle | null>(null);
+  useEffect(() => () => liveRef.current?.close(), []);
   const [modelId, setModelId] = useState<string>("");
   const [language, setLanguage] = useState<Language>("auto");
   const [diarization, setDiarization] = useState(false);
@@ -437,8 +456,8 @@ export default function App() {
   const [punctuation, setPunctuation] = useState<"auto" | "on" | "off">("auto");
   const [compute, setCompute] = useState("CPU");
   // DirectML 实测对量化模型比 CPU 慢，已隐藏开关；后端仍保留 use_gpu 能力（默认 false）。
-  // 注意：这个开关**只对 onnx 后端**有意义——完整版由后端自己看 torch.cuda.is_available()
-  // 决定用不用 CUDA，不看这个值（有卡就用，前端这个开关关着也不影响）。
+  // 注意：这个开关**只对 onnx 后端**有意义——完整版由后端 torch_device() 实测 CUDA 内核后
+  // 决定用不用 CUDA（内核不兼容就回退 CPU），不看这个值，前端这个开关关着也不影响。
   const useGpu = false;
 
   const [job, setJob] = useState<Job | null>(null);
@@ -482,11 +501,13 @@ export default function App() {
   }, []);
 
   const applyJobOptions = useCallback((saved: Job) => {
+    setSource(saved.source ?? "file");
     setModelId(saved.options.model_id || "");
+    setMaxChars(saved.options.max_chars ?? 30);
+    if (saved.source && saved.source !== "file") return;
     setLanguage(saved.options.language as Language);
     setDiarization(saved.options.diarization);
     setHotwords(saved.options.hotwords);
-    setMaxChars(saved.options.max_chars ?? 30);
     setPauseMs(saved.options.pause_ms ?? 0);
     setItn(saved.options.itn ?? true);
     setPunctuation(saved.options.punctuation ?? "auto");
@@ -555,6 +576,13 @@ export default function App() {
           return;
         }
         if (saved.status === "error") {
+          if (saved.source && saved.source !== "file" && saved.segments.length) {
+            setJob({ ...saved, status: "done" });
+            setRestored(true);
+            setJobError(saved.error?.message ?? "实时转写已结束，已有字幕可以导出。");
+            setJobDetail(saved.error?.detail ?? null);
+            return;
+          }
           rememberJob(null);
           return;
         }
@@ -587,8 +615,9 @@ export default function App() {
   }, [running]);
 
   const defaultModel = useMemo(() => models.find((m) => m.id === defaultId), [models, defaultId]);
-  const needsDownload = !!defaultModel && !defaultModel.downloaded;
+  const needsDownload = source === "file" && !!defaultModel && !defaultModel.downloaded;
   const currentModel = useMemo(() => models.find((m) => m.id === modelId), [models, modelId]);
+  const visibleModels = models.filter((m) => !!m.streaming === (source !== "file"));
   const supportsHotwords = /contextual/.test(modelId);
   const diarAvailable = !!currentModel?.diarization;  // 仅完整版 + Paraformer
   const modelNotDownloaded = !!currentModel && !currentModel.downloaded;
@@ -718,14 +747,52 @@ export default function App() {
   }, [job, clearRunState]);
 
   const onShutdown = useCallback(async () => {
+    liveRef.current?.close();
     try {
       await shutdown();
       message.info("服务已停止，可以关掉这个页面了");
     } catch { /* process may close before responding */ }
   }, [message]);
 
+  const startRealtime = () => {
+    if (running || source === "file") return;
+    clearRunState();
+    setFile(null);
+    setRestored(false);
+    rememberJob(null);
+    setRunning(true);
+    setLiveState("starting");
+    liveRef.current?.close();
+    liveRef.current = startLive(source, {
+      modelId, language: "zh", hotwords: "", maxChars, pauseMs: 0, itn: false, punctuation: "off",
+      useGpu: false, diarization: false,
+    }, {
+      onCreated: (created) => { setJob(created); rememberJob(created.id); },
+      onRecording: () => setLiveState("recording"),
+      onStopping: () => setLiveState("stopping"),
+      onChunk: (replaceFrom, segments) => setJob((cur) => cur
+        ? { ...cur, segments: [...cur.segments.slice(0, replaceFrom), ...segments] } : cur),
+      onDone: (done) => {
+        setJob(done);
+        setRunning(false);
+        setLiveState("idle");
+        liveRef.current = null;
+      },
+      onNotice: (notice) => setJobError(notice),
+      onError: (error, detail) => {
+        setJobError(error);
+        setJobDetail(detail ?? null);
+        setRunning(false);
+        setLiveState("idle");
+        setJob((cur) => cur ? { ...cur, status: "done" } : cur);
+        liveRef.current = null;
+      },
+    });
+  };
+
   const isDone = !!job && job.status === "done";
-  const showProgress = running || (!!job && !isDone && !jobError && !cancelled);
+  const liveJob = !!job?.source && job.source !== "file";
+  const showProgress = !liveJob && source === "file" && (running || (!!job && !isDone && !jobError && !cancelled));
   const stageIndex = stage ? STAGE_FLOW.indexOf(stage) : -1;
   const startLabel = running
     ? "正在转写…"
@@ -736,8 +803,8 @@ export default function App() {
         : "开始转写";
 
   // 结果卡排在设置之前：跑完第一眼就能看到字幕（否则整块落在折叠下方）。
-  const results = isDone && job ? (
-    <ResultsPanel job={job} restored={restored} file={file} />
+  const results = (isDone || liveJob) && job ? (
+    <ResultsPanel job={job} restored={restored} file={liveJob ? null : file} />
   ) : null;
 
   return (
@@ -811,8 +878,27 @@ export default function App() {
 
           {/* 装载 / 拖放区 */}
           <Card className="rise d1" variant="outlined">
-            <SectionLabel en="SOURCE">音视频</SectionLabel>
-            <Upload.Dragger
+            <SectionLabel en="SOURCE">声音来源</SectionLabel>
+            <div className="seg-scroll" style={{ marginBottom: 16 }}>
+              <Segmented
+                aria-label="声音来源"
+                disabled={running}
+                value={source}
+                options={[
+                  { label: "音视频文件", value: "file" },
+                  { label: "麦克风 · 实时", value: "microphone" },
+                  { label: "电脑声音 · 实时", value: "system" },
+                ]}
+                onChange={(value) => {
+                  setSource(value as "file" | LiveSource);
+                  setModelId(value === "file" ? defaultId : models.find((m) => m.streaming)?.id ?? "");
+                  clearRunState();
+                  setRestored(false);
+                  rememberJob(null);
+                }}
+              />
+            </div>
+            {source === "file" ? <Upload.Dragger
               className="drop-zone"
               accept={ACCEPT_MEDIA}
               multiple={false}
@@ -835,35 +921,80 @@ export default function App() {
                   常见格式都能读：mp4、mkv、mov、mp3、wav……只要里面有声音
                 </Text>
               </Flex>
-            </Upload.Dragger>
+            </Upload.Dragger> : (
+              <Flex vertical gap={12}>
+                <Text type="secondary">
+                  {source === "microphone" ? "用麦克风收录课堂或现场声音，开始时请允许浏览器使用麦克风。"
+                    : "在浏览器弹窗中选择网课标签页或屏幕，并勾选「共享音频」。推荐使用 Chrome 或 Edge。"}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  使用中文实时模型，边说边出字，首次需单独下载。保持页面打开；停止后会补完尾字。录音不会保存。
+                </Text>
+                <Flex gap={12} align="center" wrap>
+                  {!running ? (
+                    <Button color="primary" variant="solid" icon={<AudioOutlined />}
+                      disabled={!currentModel || modelNotDownloaded} onClick={startRealtime}>
+                      开始实时转写
+                    </Button>
+                  ) : (
+                    <Button variant="outlined" disabled={liveState === "stopping"}
+                      onClick={() => liveRef.current?.stop()}>
+                      {liveState === "starting" ? "取消" : liveState === "stopping" ? "正在补完…" : "停止收音"}
+                    </Button>
+                  )}
+                  <span role="status">
+                    {liveState === "starting" ? "正在准备收音和加载模型…"
+                      : liveState === "recording" ? "正在收音，字幕会持续追加"
+                        : liveState === "stopping" ? "已停止收音，正在补完字幕…"
+                          : modelNotDownloaded ? "请先下载下方所选模型。" : "字幕仅在本机生成，可随时导出。"}
+                  </span>
+                </Flex>
+              </Flex>
+            )}
           </Card>
+
+          {source !== "file" && (
+            <LiveCaptions
+              segments={liveJob && job ? job.segments : []}
+              active={running}
+              stopping={liveState === "stopping"}
+              status={jobError ? "转写已暂停，请查看主页面提示"
+                : liveState === "starting" ? "正在准备收音…"
+                  : liveState === "recording" ? "正在收音"
+                    : liveState === "stopping" ? "正在补完字幕…"
+                      : running ? "正在同步字幕…" : liveJob ? "本次转写已结束" : "等待开始收音"}
+              onStop={running && liveState !== "idle" ? () => liveRef.current?.stop() : undefined}
+            />
+          )}
 
           {results}
 
           {/* 设置 */}
           <Card className="rise d2" variant="outlined">
             <SectionLabel en="SETTINGS">
-              {isDone ? (file ? "设置 · 可改参数后重跑" : "设置 · 重新选择文件后可重跑") : "设置"}
+              {source !== "file" ? "设置 · 开始收音时生效" : isDone ? (file ? "设置 · 可改参数后重跑" : "设置 · 重新选择文件后可重跑") : "设置"}
             </SectionLabel>
             <Flex vertical gap={18}>
               <Flex gap={28} wrap align="flex-start">
-                <Flex vertical gap={8} style={{ minWidth: 0, maxWidth: "100%" }}>
+                {source === "file" && <Flex vertical gap={8} style={{ minWidth: 0, maxWidth: "100%" }}>
                   <Text type="secondary" style={{ fontSize: 12 }}>语言</Text>
                   <div className="seg-scroll">
                     <Segmented
+                      disabled={running}
                       value={language}
                       onChange={(v) => setLanguage(v as Language)}
                       options={LANGUAGE_OPTIONS.map((o) => ({ label: o.label, value: o.value }))}
                     />
                   </div>
-                </Flex>
+                </Flex>}
                 <Flex vertical gap={8} style={{ minWidth: 280, flex: 1 }}>
                   <Text type="secondary" style={{ fontSize: 12 }}>模型</Text>
                   <Select
+                    disabled={running}
                     value={modelId || undefined}
                     onChange={setModelId}
                     loading={models.length === 0}
-                    options={models.map((m) => ({
+                    options={visibleModels.map((m) => ({
                       value: m.id,
                       label: m.downloaded ? m.name : `${m.name}（未下载）`,
                     }))}
@@ -872,7 +1003,7 @@ export default function App() {
               </Flex>
 
               <Flex gap={28} wrap align="flex-end">
-                <Flex vertical gap={8} style={{ flex: 1, minWidth: 240 }}>
+                {source === "file" && <Flex vertical gap={8} style={{ flex: 1, minWidth: 240 }}>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     热词{!supportsHotwords && "（只有「热词版」模型认）"}
                   </Text>
@@ -880,14 +1011,15 @@ export default function App() {
                     value={hotwords}
                     onChange={(e) => setHotwords(e.target.value)}
                     placeholder="输入关键词，用空格分开（可不填）"
-                    disabled={!supportsHotwords}
+                    disabled={running || !supportsHotwords}
                   />
-                </Flex>
+                </Flex>}
                 <Flex vertical gap={8} style={{ flex: 1, minWidth: 180, maxWidth: 260 }}>
                   <Tooltip title="一行显示多少个字符。中文按字算，英文两个字母算一个。填 0 就只按句子断，不控长度。">
                     <FieldLabel hint="0 = 不按长度断句">每行最多几个字</FieldLabel>
                   </Tooltip>
                   <InputNumber
+                    disabled={running}
                     min={0}
                     max={100}
                     value={maxChars}
@@ -895,11 +1027,12 @@ export default function App() {
                     style={{ width: "100%" }}
                   />
                 </Flex>
-                <Flex vertical gap={8} style={{ flex: 1, minWidth: 170, maxWidth: 230 }}>
+                {source === "file" && <Flex vertical gap={8} style={{ flex: 1, minWidth: 170, maxWidth: 230 }}>
                   <Tooltip title="说话停顿超过这个毫秒数时，在这里断句——一句话说完一停，正好分成两行，而不是按字数硬切。填 0 就还是只按字数和标点断（最小 150 毫秒）。注意：断成两段后每段单独转写、单独加标点，所以段末的逗号可能变成句号。">
                     <FieldLabel hint="0 = 不按停顿断句">停顿超过几毫秒就断</FieldLabel>
                   </Tooltip>
                   <InputNumber
+                    disabled={running}
                     min={0}
                     max={5000}
                     step={50}
@@ -907,12 +1040,13 @@ export default function App() {
                     onChange={(v) => setPauseMs((prev) => (v == null ? prev : v))}
                     style={{ width: "100%" }}
                   />
-                </Flex>
-                <Flex vertical gap={8}>
+                </Flex>}
+                {source === "file" && <Flex vertical gap={8}>
                   <Tooltip title="自动：中文加标点，英文按停顿断句（英文标点容易加错）。加标点：不管什么语言都加。不加标点：只按停顿和行宽断。">
                     <FieldLabel>标点</FieldLabel>
                   </Tooltip>
                   <Segmented
+                    disabled={running}
                     value={punctuation}
                     onChange={(v) => setPunctuation(v as "auto" | "on" | "off")}
                     options={[
@@ -921,16 +1055,17 @@ export default function App() {
                       { label: "不加标点", value: "off" },
                     ]}
                   />
-                </Flex>
+                </Flex>}
               </Flex>
 
-              <Flex gap={28} wrap align="center">
+              {source === "file" && <Flex gap={28} wrap align="center">
                 <Tooltip title={diarAvailable
                   ? "给每句字幕标上是谁说的，导出的字幕里会带 [spk0]、[spk1] 这样的记号"
                   : "只有「完整版」程序配 Paraformer 模型能区分说话人。轻量版（onnx）和 SenseVoice 做不到。"}>
                   <Flex align="center" gap={10}>
                     <span className="switch-hit">
-                      <Switch checked={diarization && diarAvailable} disabled={!diarAvailable} onChange={setDiarization} />
+                      <Switch checked={diarization && diarAvailable}
+                        disabled={running || !diarAvailable} onChange={setDiarization} />
                     </span>
                     <Text type={diarAvailable ? undefined : "secondary"}>
                       区分说话人{diarAvailable ? "" : "（需完整版 + Paraformer）"}
@@ -940,12 +1075,16 @@ export default function App() {
                 <Tooltip title="把说话里的中文数字写成阿拉伯数字：「二零二五年」写成「2025年」，「十五台」写成「15台」；「三个苹果」这种带量词的不动。关掉就保留中文数字原样。">
                   <Flex align="center" gap={10}>
                     <span className="switch-hit">
-                      <Switch checked={itn} onChange={setItn} />
+                      <Switch checked={itn} disabled={running} onChange={setItn} />
                     </span>
                     <Text>数字转阿拉伯数字</Text>
                   </Flex>
                 </Tooltip>
-              </Flex>
+              </Flex>}
+
+              {source !== "file" && <Text type="secondary" style={{ fontSize: 12 }}>
+                实时模型仅支持中文，暂不加标点、不区分说话人。导出时间按收音块估算，不含逐字时间戳。
+              </Text>}
 
               {!needsDownload && modelNotDownloaded && currentModel && (
                 <ModelDownloadPanel
@@ -955,7 +1094,7 @@ export default function App() {
                 />
               )}
 
-              <Flex vertical gap={8}>
+              {source === "file" && <Flex vertical gap={8}>
                 <Flex gap={12} align="center" wrap>
                   <Button
                     color="primary"
@@ -978,7 +1117,7 @@ export default function App() {
                 {!file && (
                   <Text type="secondary" style={{ fontSize: 12 }}>先选一个音视频文件，才能开始转写。</Text>
                 )}
-              </Flex>
+              </Flex>}
             </Flex>
           </Card>
 
@@ -1038,8 +1177,10 @@ export default function App() {
                     </details>
                   )}
                   <Space size={6} wrap>
-                    {file && <Button size="small" icon={<ReloadOutlined />} onClick={start}>重新转写</Button>}
-                    <Button size="small" onClick={openFilePicker}>换个文件</Button>
+                    {source === "file" && <>
+                      {file && <Button size="small" icon={<ReloadOutlined />} onClick={start}>重新转写</Button>}
+                      <Button size="small" onClick={openFilePicker}>换个文件</Button>
+                    </>}
                   </Space>
                 </Flex>
               }

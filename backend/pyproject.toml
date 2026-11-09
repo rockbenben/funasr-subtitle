@@ -24,7 +24,7 @@ dependencies = [
 # app/engine/README.md），所以这里**不**提供 onnxruntime-directml：
 # 它和 funasr-onnx 依赖的纯 CPU 版 onnxruntime 提供同名包，会互相覆盖，
 # 单靠 pip 解析无法保证 DirectML 胜出。想手动试 DirectML 见 README「开发」。
-onnx = ["funasr-onnx>=0.4.3", "modelscope>=1.40"]
+onnx = ["funasr-onnx>=0.4.9", "modelscope>=1.40"]
 tray = ["pystray>=0.19", "pillow>=13"]
 dev = ["pytest>=9", "httpx>=0.28", "ruff>=0.17"]
 package = ["pyinstaller>=6.22"]

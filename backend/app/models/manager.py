@@ -26,7 +26,9 @@ from .registry import (
     FULL_PUNC_SIZE_MB,
     FULL_VAD_REPO,
     FULL_VAD_SIZE_MB,
+    PUNC_MODEL,
     REGISTRY,
+    VAD_MODEL,
     ModelSpec,
     get_model,
 )
@@ -128,6 +130,8 @@ class ModelManager:
         d = self.local_dir(model_id)
         if not (d / _ONNX_MAIN).is_file():
             return False
+        if not all((d / name).is_file() for name in spec.required_files):
+            return False
         # 辅助文件（如 SenseVoice 的 bpe 词表）也必须就位
         for fname, _src in spec.aux_files:
             if not (d / fname).exists():
@@ -145,6 +149,33 @@ class ModelManager:
         return self.local_dir(model_id)
 
     # ---- onnx 模型下载 ----
+    def onnx_parts(self, model_id: str) -> list[ModelSpec]:
+        spec = get_model(model_id)
+        if spec.streaming or spec.task != "asr":
+            return [spec]
+        return [spec, VAD_MODEL] + ([] if spec.builtin_punc else [PUNC_MODEL])
+
+    def onnx_downloaded(self, model_id: str) -> bool:
+        return all(self.is_downloaded(part.id) for part in self.onnx_parts(model_id))
+
+    def onnx_total_mb(self, model_id: str) -> float:
+        return sum(part.size_mb for part in self.onnx_parts(model_id))
+
+    def download_onnx(self, model_id: str, progress: DownloadProgress | None = None) -> None:
+        # 按仓库下载复用已有锁；多个 ASR 共享 VAD/punc，也不会互相覆盖。
+        parts = self.onnx_parts(model_id)
+        total = sum(part.size_mb for part in parts)
+        completed = 0.0
+        for part in parts:
+            def report(pct: float, got: float, _total: float, *,
+                       base: float = completed, size: float = part.size_mb) -> None:
+                if progress:
+                    progress((base + size * pct / 100) / total * 100, base + got, total)
+            self.download(part.id, progress=report)
+            if not self.is_downloaded(part.id):
+                raise RuntimeError(f"download incomplete for {part.id}")
+            completed += part.size_mb
+
     def download(self, model_id: str, progress: DownloadProgress | None = None) -> Path:
         """同步下载。progress(percent, downloaded_mb, total_mb)。
 
@@ -248,6 +279,8 @@ class ModelManager:
         """
         if not spec.full_repo:
             return []
+        if spec.streaming:
+            return [(spec.full_repo, spec.full_size_mb)]
         parts = [(spec.full_repo, spec.full_size_mb), (FULL_VAD_REPO, FULL_VAD_SIZE_MB)]
         if not spec.builtin_punc:
             parts.append((FULL_PUNC_REPO, FULL_PUNC_SIZE_MB))
@@ -329,10 +362,11 @@ class ModelManager:
 
     # ---- 遗留 API（当前无人调用） ----
     def status(self, model_id: str) -> bool:
-        """遗留接口：等价于 is_downloaded()。
+        """遗留接口：等价于 is_downloaded()，当前无人调用。
 
-        注意它**只看 onnx 仓库**，在 full 后端下会误报「没下好」——
-        /api/models 因此不调它，而是按后端分别走 full_downloaded() / is_downloaded()。
+        注意它**只看单个 onnx 仓库**：既不看 onnx_parts 里的 VAD/punc，也不认 pt 权重，
+        在 full 后端下会误报「没下好」——路由因此走 `_model_ready()`，按后端分别调
+        full_downloaded() / onnx_downloaded()。
         """
         return self.is_downloaded(model_id)
 

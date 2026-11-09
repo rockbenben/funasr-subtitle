@@ -97,6 +97,25 @@ def test_models_full_backend_contract(client, monkeypatch):
     assert para["diarization"] is True
 
 
+def test_onnx_panel_requires_vad_after_asr_download(client):
+    from app.models.registry import SENSEVOICE, VAD_MODEL
+
+    mgr = client.app.state.models
+    asr = mgr.root / SENSEVOICE.repo
+    asr.mkdir(parents=True)
+    (asr / "model_quant.onnx").touch()
+    for name, _ in SENSEVOICE.aux_files:
+        (asr / name).touch()
+    default = next(m for m in client.get("/api/models").json()["models"] if m["id"] == SENSEVOICE.id)
+    assert not default["downloaded"]
+    assert default["size_mb"] == SENSEVOICE.size_mb + VAD_MODEL.size_mb
+    vad = mgr.root / VAD_MODEL.repo
+    vad.mkdir(parents=True)
+    (vad / "model_quant.onnx").touch()
+    default = next(m for m in client.get("/api/models").json()["models"] if m["id"] == SENSEVOICE.id)
+    assert default["downloaded"]
+
+
 def test_job_not_found_error_shape(client):
     r = client.get("/api/jobs/nope")
     assert r.status_code == 404

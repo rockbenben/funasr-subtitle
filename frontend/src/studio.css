@@ -194,6 +194,117 @@ body::after {
   .seg-scroll::-webkit-scrollbar { display: none; }
 }
 
+/* ---- 歌词式实时字幕：独立视图与画中画窗口共用 ---- */
+.live-captions {
+  container-type: inline-size;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  padding: 20px 24px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #1c1915;
+  color: #ece4d5;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+}
+.live-caption-header, .live-caption-footer, .caption-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.live-caption-header h2 { margin: 0; color: var(--text-dim); font-size: 0.875rem; font-weight: 500; }
+.caption-button {
+  min-block-size: 36px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--amber-soft);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.caption-button:hover { background: #30271c; border-color: var(--amber); }
+.caption-button:disabled { color: var(--text-dim); cursor: wait; }
+.caption-button:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
+.live-caption-stage {
+  display: flex;
+  flex: 1;
+  min-block-size: 180px;
+  overflow-y: auto;
+  padding-block: 24px;
+  scrollbar-width: thin;
+}
+.live-caption-lines { inline-size: 100%; margin-block: auto; text-align: center; }
+.live-caption-current {
+  margin: 12px 0 0;
+  color: var(--amber-soft);
+  font-size: clamp(1.5rem, 5cqi, 2.5rem);
+  font-weight: 600;
+  line-height: 1.55;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+.live-caption-empty { color: var(--text-dim); font-size: clamp(1.125rem, 4cqi, 1.75rem); font-weight: 400; }
+.live-caption-previous {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 6px 0;
+  color: var(--text-dim);
+  font-size: 1rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.live-caption-footer { color: var(--text-dim); font-size: 0.75rem; line-height: 1.6; }
+.caption-status { display: inline-flex; align-items: center; gap: 7px; font-size: 0.75rem; color: var(--text-dim); }
+.caption-status::before { content: ""; inline-size: 6px; block-size: 6px; border-radius: 50%; background: currentColor; }
+.caption-status.is-recording { color: var(--amber-soft); }
+.ant-segmented .ant-segmented-item-selected,
+.ant-segmented .ant-segmented-item-selected .ant-segmented-item-label {
+  background: #e8a33d !important;
+  color: #1a1610 !important;
+  -webkit-text-fill-color: #1a1610;
+  opacity: 1;
+}
+.live-captions-detached.caption-inline-window {
+  position: fixed;
+  z-index: 1100;
+  inset: auto 20px 20px auto;
+  inline-size: min(720px, calc(100vw - 40px));
+  block-size: min(360px, calc(100dvh - 40px));
+  min-inline-size: min(320px, calc(100vw - 40px));
+  min-block-size: 200px;
+  border: 1px solid var(--amber);
+  border-radius: 14px;
+  box-shadow: 0 12px 48px #0009;
+  resize: both;
+  overflow: auto;
+}
+.caption-window-error { margin: 14px 0 0; font-size: 0.8125rem; color: #ee6b62; }
+.caption-window-error p { margin: 0 0 6px; }
+.caption-window-error pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+body.caption-window { background: var(--bg); background-image: none; color-scheme: dark; }
+body.caption-window::before, body.caption-window::after { content: none; }
+#caption-root { block-size: 100dvh; }
+.live-captions-detached { block-size: 100%; border: 0; border-radius: 0; padding: 14px 20px; }
+.live-captions-detached .live-caption-stage { min-block-size: 0; }
+.live-captions-detached .live-caption-current { font-size: clamp(1.5rem, 5.5cqi, 3rem); }
+@media (max-height: 300px) {
+  .live-captions-detached .live-caption-stage { padding-block: 12px; }
+  .live-captions-detached .live-caption-previous { display: none; }
+  .live-captions-detached .live-caption-previous:nth-last-child(2) {
+    display: block;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 0.875rem;
+  }
+}
+
 /* ---- 滚动条 ---- */
 *::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-thumb { background: #322c24; border-radius: 6px; border: 2px solid var(--bg); }

@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from .api.live import register_live_ws
 from .api.routes import register_ws, router
 from .config import DEFAULT_PORT, bundle_dir, is_frozen
 from .jobs import JobManager
@@ -93,6 +94,7 @@ def create_app() -> FastAPI:
 
     # 路由
     app.include_router(router)
+    register_live_ws(app)
     register_ws(app)
 
     # 前端静态资源（放在最后，作为 SPA 兜底）

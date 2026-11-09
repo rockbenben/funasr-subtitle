@@ -96,3 +96,7 @@ jobs:
       - name: contrast check
         working-directory: frontend
         run: npm run check:contrast
+
+      - name: live audio tests
+        working-directory: frontend
+        run: npm run test:live

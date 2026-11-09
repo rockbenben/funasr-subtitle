@@ -45,6 +45,8 @@ const CASES = [
   ["时间码 on 卡片", STUDIO.amberSoft, container, 4.5],
   ["破坏性文字钮 on 页底（暖光晕实测底）", "#EE6B62", hex("#27211A"), 4.5],
   ["filled 主钮前景 on 实测 filled 底", STUDIO.amberSoft, hex("#543F21"), 4.5],
+  ["悬浮字幕当前句 on 暖炭底", STUDIO.amberSoft, hex(STUDIO.bgElevated), 4.5],
+  ["悬浮字幕上文与状态 on 暖炭底", STUDIO.textDim, hex(STUDIO.bgElevated), 4.5],
 ];
 
 const css = readFileSync(new URL("../src/studio.css", import.meta.url), "utf8");

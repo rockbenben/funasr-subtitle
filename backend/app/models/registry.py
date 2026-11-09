@@ -39,6 +39,8 @@ class ModelSpec:
     # 完整后端的总下载量 = 本体 + VAD + (不自带标点时) ct-punc，见 manager._full_parts。
     full_repo: str = ""
     full_size_mb: float = 0.0
+    streaming: bool = False
+    required_files: tuple[str, ...] = ()
 
 
 # ---- ASR（面向用户可选） ----
@@ -109,15 +111,27 @@ PUNC_MODEL = ModelSpec(
     repo="iic/punc_ct-transformer_zh-cn-common-vocab272727-onnx",
 )
 
+STREAMING_PARAFORMER = ModelSpec(
+    id="iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx",
+    name="Paraformer 实时版（中文）",
+    task="asr", size_mb=228.0,
+    repo="iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx",
+    engine="streaming", streaming=True,
+    required_files=("decoder_quant.onnx", "config.yaml", "am.mvn", "tokens.json"),
+    full_model="paraformer-zh-streaming",
+    full_repo="iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
+    full_size_mb=849.0,
+)
+
 DEFAULT_MODEL_ID = SENSEVOICE.id
 
 # 面向用户的 ASR 模型目录（UI 下拉）
-ASR_MODELS: list[ModelSpec] = [SENSEVOICE, PARAFORMER_ZH, PARAFORMER_ZH_HOTWORD]
+ASR_MODELS: list[ModelSpec] = [SENSEVOICE, PARAFORMER_ZH, PARAFORMER_ZH_HOTWORD, STREAMING_PARAFORMER]
 
 # 全部模型（含辅助），按 id 索引
 REGISTRY: dict[str, ModelSpec] = {
     m.id: m for m in (SENSEVOICE, PARAFORMER_ZH, PARAFORMER_ZH_HOTWORD,
-                      VAD_MODEL, PUNC_MODEL)
+                      STREAMING_PARAFORMER, VAD_MODEL, PUNC_MODEL)
 }
 
 

@@ -19,13 +19,36 @@ import threading
 import traceback
 import uuid
 from collections import OrderedDict
+from concurrent.futures import Future
+from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
-from ..config import ENGINE_CACHE_SIZE, MAX_JOBS, jobs_dir
+import numpy as np
+
+from ..config import ENGINE_CACHE_SIZE, MAX_CUE_MS, MAX_JOBS, jobs_dir
 from ..engine import build_engine
+from ..engine.live import LiveEngine
 from ..media import DecodeCancelled, DecodeError, decode_to_16k_mono
 from ..schemas import Job, JobError, JobOptions, JobStatus
+from ..subtitle import segment_span
+
+
+@dataclass
+class LiveChunk:
+    job_id: str
+    pcm: bytes
+    result: Future
+    final: bool = False
+
+
+@dataclass
+class LiveSession:
+    engine: LiveEngine | None = None
+    samples: int = 0
+    text: str = ""
+    start_ms: int = 0
+    committed: int = 0
 
 
 class EventBroker:
@@ -69,7 +92,8 @@ class JobManager:
         # 每个模型最近一次下载的终态（done/error），供 WS 迟到订阅者补发
         self.model_status: dict[str, dict] = {}
         self.broker = EventBroker()
-        self._q: _queue.Queue[str] = _queue.Queue()
+        self._q: _queue.Queue[str | LiveChunk] = _queue.Queue()
+        self._live_sessions: dict[str, LiveSession] = {}
         self._inputs: dict[str, Path] = {}
         self._cancels: dict[str, threading.Event] = {}
         self._engines: OrderedDict[str, object] = OrderedDict()  # model_id -> 引擎（LRU）
@@ -110,6 +134,88 @@ class JobManager:
     def get(self, job_id: str) -> Job | None:
         return self.jobs.get(job_id)
 
+    @property
+    def live_active(self) -> bool:
+        return bool(self._live_sessions)
+
+    def is_live(self, job_id: str) -> bool:
+        return job_id in self._live_sessions
+
+    def create_live(self, options: JobOptions, source: str) -> Job:
+        if any(j.status not in {JobStatus.done, JobStatus.error} for j in self.jobs.values()):
+            raise ValueError("请先等当前转写结束，再开始实时转写。")
+        job_id = uuid.uuid4().hex[:12]
+        # 在线模型只输出中文文本；不把未接入的离线选项写成已经生效。
+        options = options.model_copy(update={
+            "diarization": False, "language": "zh", "hotwords": "", "pause_ms": 0,
+            "itn": False, "punctuation": "off", "use_gpu": False,
+        })
+        job = Job(id=job_id, filename="课堂实时转写", source=source,
+                  status=JobStatus.asr, options=options)
+        self.jobs[job_id] = job
+        self._cancels[job_id] = threading.Event()
+        self._live_sessions[job_id] = LiveSession()
+        return job
+
+    def submit_live(self, job_id: str, pcm: bytes, *, final: bool = False) -> Future:
+        result: Future = Future()
+        self._q.put(LiveChunk(job_id, pcm, result, final))
+        return result
+
+    def finish_live(self, job_id: str) -> None:
+        if job_id not in self._live_sessions:
+            return
+        job = self.jobs[job_id]
+        if job.status != JobStatus.error:
+            job.status = JobStatus.done
+            job.percent = 100.0
+        self._live_sessions.pop(job_id, None)
+        self._cleanup_input(job_id)
+
+    def _process_live(self, task: LiveChunk) -> None:
+        if not task.result.set_running_or_notify_cancel():
+            return
+        job = self.jobs[task.job_id]
+        try:
+            cancel = self._cancels[task.job_id]
+            session = self._live_sessions[task.job_id]
+            if cancel.is_set() or job.status == JobStatus.error:
+                task.result.set_result({"replace_from": len(job.segments), "segments": []})
+                return
+            if session.engine is None:
+                # 流式模型的前端也有状态，每次收音单独创建；先释放闲置文件引擎控制峰值内存。
+                self._engines.clear()
+                session.engine = LiveEngine()
+                session.engine.load()
+            wav = np.frombuffer(task.pcm, dtype="<i2").astype(np.float32) / 32768.0
+            before = session.samples // 16
+            session.samples += len(wav)
+            end = session.samples // 16
+            text = session.engine.feed(wav, final=task.final) if len(wav) or (
+                task.final and session.samples
+            ) else ""
+            if text and not session.text:
+                session.start_ms = min(before, max(0, end - 1))
+            session.text += text
+            # 在线模型不返回逐字时间；这里只提供按收音块估计的行级时间，words 始终为空。
+            segments = segment_span(session.text, session.start_ms, max(end, session.start_ms + 1),
+                                    max_chars=job.options.max_chars) if session.text else []
+            replace_from = session.committed
+            job.segments[replace_from:] = segments
+            if end - session.start_ms >= MAX_CUE_MS or task.final:
+                session.committed = len(job.segments)
+                session.text = ""
+                session.start_ms = end
+            task.result.set_result({"replace_from": replace_from,
+                                    "segments": [s.model_dump() for s in segments]})
+        except Exception as exc:  # noqa: BLE001
+            traceback.print_exc()
+            self._fail(job, "live_failed", "实时转写中断了，已显示的字幕仍可导出。", detail=str(exc))
+            task.result.set_exception(exc)
+        finally:
+            if task.final:
+                self.finish_live(task.job_id)
+
     def cancel(self, job_id: str) -> bool:
         ev = self._cancels.get(job_id)
         if ev:
@@ -120,9 +226,13 @@ class JobManager:
     # ---- worker ----
     def _run(self) -> None:
         while not self._stop.is_set():
-            job_id = self._q.get()
-            if self._stop.is_set() or not job_id:
+            item = self._q.get()
+            if self._stop.is_set() or not item:
                 break
+            if isinstance(item, LiveChunk):
+                self._process_live(item)
+                continue
+            job_id = item
             job = self.jobs.get(job_id)
             if not job:
                 continue

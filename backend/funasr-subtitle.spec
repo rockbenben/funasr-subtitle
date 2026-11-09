@@ -55,6 +55,7 @@ for pkg in ["funasr_onnx", "librosa", "scipy", "sklearn"]:
 hiddenimports += [
     "funasr_onnx",
     "funasr_onnx.sensevoice_bin",
+    "funasr_onnx.paraformer_online_bin",
     "funasr_onnx.vad_bin",
     "funasr_onnx.punc_bin",
     "funasr_onnx.paraformer_bin",

@@ -53,14 +53,15 @@ def _full_backend() -> bool:
 
 
 def _model_ready(mgr: ModelManager, model_id: str) -> bool:
-    """当前后端真正能用的判断：onnx 看 onnx 仓库，full 看 pt 模型（ASR+VAD+punc）。
+    """当前后端真正能用的判断：onnx 看 onnx_parts 清单，full 看 _full_parts 清单。
 
-    完整版的「就位」= 预置清单里的 pt 权重全在（见 ModelManager._full_parts）；
+    两侧都不只看 ASR 本体：还要 VAD（+ 不自带标点时的 ct-punc）齐了才算就位；
+    实时模型 `streaming=True` 是例外，清单里只有本体（onnx 侧另查 required_files）。
     cam++ 不在清单里，勾了说话人分离才由 funasr 在加载引擎时补下。
     """
     if _full_backend():
         return mgr.full_downloaded(model_id)
-    return mgr.is_downloaded(model_id)
+    return mgr.onnx_downloaded(model_id)
 
 
 @router.get("/models")
@@ -74,10 +75,11 @@ async def list_models(request: Request) -> dict:
             "id": spec.id, "name": spec.name, "task": spec.task,
             # 体积与「已就位」都按后端取：onnx 包是 onnx 仓库的量级（几百 MB），
             # 完整版是 pt 权重（0.9–2.1 GB），拿 onnx 的数字充数会骗人。
-            "size_mb": mgr.full_total_mb(spec.id) if full else spec.size_mb,
-            "downloaded": mgr.full_downloaded(spec.id) if full else mgr.is_downloaded(spec.id),
+            "size_mb": mgr.full_total_mb(spec.id) if full else mgr.onnx_total_mb(spec.id),
+            "downloaded": _model_ready(mgr, spec.id),
             # 说话人分离仅完整版(full) + Paraformer 系（能出 sentence_info）支持
             "diarization": full and spec.engine in ("paraformer", "contextual"),
+            "streaming": spec.streaming,
         })
     return {"models": out, "default_id": DEFAULT_MODEL_ID,
             "compute": compute_label()}
@@ -106,7 +108,7 @@ async def download_model(model_id: str, request: Request):
             if full:
                 mgr.download_full(model_id, progress=progress)
             else:
-                mgr.download(model_id, progress=progress)
+                mgr.download_onnx(model_id, progress=progress)
             ev = {"type": "done"}
         except Exception as e:  # noqa: BLE001
             ev = {"type": "error", "code": "download_failed", "message": "下载失败，点重试", "detail": str(e)}
@@ -135,6 +137,13 @@ async def create_job(
     punctuation: str = Form("auto"),
 ):
     mgr = request.app.state.jobs
+    if mgr.live_active:
+        return _err("busy", "正在实时转写，请先停止录音，再转写文件。", 409)
+    try:
+        if get_model(model_id or DEFAULT_MODEL_ID).streaming:
+            return _err("live_only", "这个模型用于实时转写，请为文件选择其他模型。")
+    except KeyError:
+        return _err("unknown_model", "没有这个模型。", 404)
     # 落盘上传文件到 jobs/<uuid>/<filename>
     safe_name = Path(file.filename or "input").name
     dest_dir = jobs_dir() / uuid.uuid4().hex[:12]
@@ -169,6 +178,9 @@ async def create_job(
         itn=str(itn).lower() in {"true", "1", "yes", "on"},
         punctuation=punctuation if punctuation in {"auto", "on", "off"} else "auto",
     )
+    if mgr.live_active:
+        shutil.rmtree(dest_dir, ignore_errors=True)
+        return _err("busy", "正在实时转写，请先停止录音，再转写文件。", 409)
     job = mgr.create(safe_name, dest, options)
     return {"job_id": job.id}
 

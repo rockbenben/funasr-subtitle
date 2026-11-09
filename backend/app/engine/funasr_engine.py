@@ -2,7 +2,7 @@
 
 §17 验证结论（详见 engine/README.md）：
 - ASR 默认 = iic/SenseVoiceSmall-onnx 的 model_quant.onnx（torch-free）。
-  · 当前 funasr-onnx 0.4.3 的 SenseVoiceSmall 已不 import torch（CTC 解码改成 numpy），
+  · 当前 funasr-onnx（0.4.3 起，0.4.9 仍如此）的 SenseVoiceSmall 已不 import torch（CTC 解码改成 numpy），
     整个包可以在没有 torch 的环境里 import；但它的 __call__ 只给文本不给时间戳，
     我们仍然绕过 __call__，自己用 numpy 解 CTC 并记下每个 token 的首现帧号。
   · 文本前带特殊标记 <|lang|><|emo|><|event|><|itn|>，需剥离。
@@ -14,7 +14,7 @@
   负责圈出「哪里在说话」，不产文本。
 - punc = ct-punc onnx（仅含 model_quant.onnx -> quantize=True）：默认模型 SenseVoice 自带
   标点（builtin_punc），**不加载** ct-punc；只有 Paraformer 这类不自带标点的模型才用，
-  且是遇到无标点文本时才懒加载。上游 0.4.3 的 ct-punc 内部按 20 token 分块，
+  且是遇到无标点文本时才懒加载。上游 0.4.3 起（0.4.9 仍如此）的 ct-punc 内部按 20 token 分块，
   长文本整段都会加标点，我们不用再自己分块。
 - torch-stub 必须在 modelscope 完成初始化、且 scipy/librosa 已 torch-free 导入之后再安装。
   （它防的是「用户 venv 里装了真 torch」时 modelscope 探测到 torch 后崩那条老路，
@@ -289,6 +289,7 @@ class FunasrEngine:
         funasr_onnx = _ensure_funasr()
 
         # 确保模型已在本地（缺则同步下载）
+        self.manager.download_onnx(self.opts.model_id)
         vad_dir = str(self.manager.ensure_dir(VAD_MODEL.id))
         asr_dir = str(self.manager.ensure_dir(self.opts.model_id))
 
@@ -313,9 +314,10 @@ class FunasrEngine:
             self._asr = funasr_onnx.ContextualParaformer(
                 asr_dir, quantize=True, device_id=device_id, intra_op_num_threads=threads
             )
-            # funasr-onnx 的 ContextualParaformer.__init__ 漏设 language，
-            # __call__ 会读它来选后处理；中文设任意非 "en-bpe" 值即可。
-            # 上游修好后这行可以删（见 engine/README.md §6）。
+            # 0.4.9 的 ContextualParaformer.__init__ 已按 config["lang"] 设 self.language
+            # （本仓库 config 没有 lang，所以是 None）；__call__ 只对 "en-bpe" 走英文后处理，
+            # None 与 "zh" 同走中文分支。显式设 "zh" 只是防将来 config 带上 lang 的保险。
+            # 别把这行当成上游 bug 的必需补丁（0.4.9 源码已不成立，见 engine/README.md §6）。
             self._asr.language = "zh"
         else:  # sensevoice
             self._asr = funasr_onnx.SenseVoiceSmall(
@@ -426,11 +428,15 @@ class FunasrEngine:
 
         长文本**不用我们自己分块**：上游 funasr-onnx 的 `CT_Transformer.__call__`
         内部就按 20 token 分块逐块加标点（`split_size=20`），整段都能标上——
-        早先「ct-punc 对超长输入只在结尾加标点」的问题在 funasr-onnx 0.4.3 已经没有了
-        （我们当时的 110 字分块反而会把句子切碎）。pyproject 的下限已经是 0.4.3 ✓。
+        早先「ct-punc 对超长输入只在结尾加标点」的问题在 funasr-onnx 0.4.3 起就没有了
+        （我们当时的 110 字分块反而会把句子切碎）；0.4.9 上复测仍是 `split_size=20`。
+        pyproject 的下限已是 0.4.9（实时路径要上游的短包/空尾包修复）✓。
         """
         try:
-            if self._punc is None:  # 懒加载 ct-punc（SenseVoice 默认不预载，遇到无标点文本才下载）
+            if self._punc is None:
+                # SenseVoice 的标点补全是可选兜底；离线时保留原文，不能偷偷触发下载。
+                if not self.manager.is_downloaded(PUNC_MODEL.id):
+                    return text
                 import funasr_onnx
                 punc_dir = str(self.manager.ensure_dir(PUNC_MODEL.id))
                 self._punc = funasr_onnx.CT_Transformer(

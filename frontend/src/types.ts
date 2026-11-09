@@ -29,6 +29,7 @@ export interface Segment {
 export interface Job {
   id: string;
   filename: string;
+  source?: "file" | "microphone" | "system";
   status: JobStatus;
   percent: number;
   options: {
@@ -51,6 +52,7 @@ export interface ModelInfo {
   id: string;
   name: string;
   task: string;
+  streaming?: boolean;
   /** 按后端取的下载体积（MB）：onnx 后端几百，完整版 0.9–2.1 GB。 */
   size_mb: number;
   /** 按后端取的「已就位」：onnx 看 onnx 仓库，完整版看 pt 权重。 */

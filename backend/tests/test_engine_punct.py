@@ -27,3 +27,18 @@ def test_latin_falls_back_to_ctpunc_when_native_has_no_terminal():
     native = "hello world how are you today"  # 无终止标点
     out = _latin_punct(native, native, lambda _s: "hello world. how are you today?")
     assert _has_terminal(out)
+
+
+def test_optional_punctuation_does_not_download_when_uncached(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    from app.engine import build_engine
+
+    engine = build_engine(models_root=str(tmp_path))
+    calls = []
+    monkeypatch.setitem(sys.modules, "funasr_onnx", SimpleNamespace(
+        CT_Transformer=lambda *a, **kw: lambda text: text))
+    monkeypatch.setattr(engine.manager, "ensure_dir", lambda model_id: calls.append(model_id) or tmp_path)
+    assert engine._punctuate("没有标点") == "没有标点"
+    assert not calls
