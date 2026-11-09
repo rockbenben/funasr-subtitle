@@ -1,19 +1,19 @@
 # 完整 funasr（torch）后端依赖 —— 仅 "full" 构建变体用。
 #
 # torch 需单独从 CUDA index 安装（不在此文件，避免装成 CPU 版）：
-#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+#   pip install -r requirements-cuda.txt
 # 然后再装本文件：
 #   pip install -r requirements-full.txt
 #
 # 无 NVIDIA 卡时改用 CPU 版 torch（但相比 onnx CPU 包无提速，不推荐）：
-#   pip install torch torchaudio
+#   pip install torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cpu
 #
-# funasr 不钉版本：取当前最新。已验证可用的版本见 app/engine/README.md §0
-# （本文件只管 torch/CUDA 那条线，funasr 本体由 pip 解析最新稳定版）。
+# 保留已验证的 FunASR 版本，避免一次 CUDA 升级同时改变识别行为。
+# 已验证可用的版本与升级依据见 app/engine/README.md §0。
 #
 # numpy 这里不设上界：torch 那条线能跑 numpy 2.x；而 pyproject（onnx 线）因为
 # funasr-onnx 要求 numpy<=1.26.4，必须锁在 1.x。两条线的 numpy 不一样，别混装。
-funasr
+funasr==1.4.16
 fastapi>=0.162
 uvicorn[standard]>=0.54
 pydantic>=2.14

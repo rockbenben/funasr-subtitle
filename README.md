@@ -65,13 +65,13 @@
 | 包                                   | 大小    | 后端                 | 适用                                                                          |
 | ------------------------------------ | ------- | -------------------- | ----------------------------------------------------------------------------- |
 | **funasr-subtitle-win-x64.zip**      | ~372 MB | funasr-onnx · 纯 CPU | 绝大多数人首选（RTF ≈ 0.1，无需显卡）                                         |
-| **funasr-subtitle-cuda-win-x64.zip** | ~2.7 GB | 完整 funasr · torch  | 有 N 卡且随包内核支持就自动 GPU 加速，否则回退 CPU；要说话人分离 / Paraformer 高精度 / 大模型 |
+| **funasr-subtitle-cuda-win-x64.zip** | 数 GB | 完整 funasr · torch  | 有 N 卡且随包内核支持就自动 GPU 加速，否则回退 CPU；要说话人分离 / Paraformer 高精度 / 大模型 |
 
 > [!NOTE]
 > 首次运行需联网下载模型（CPU 包默认 SenseVoice ≈ 235 MB；完整版用 pt 模型，SenseVoice ≈ 0.9 GB，Paraformer-zh ≈ 2.1 GB），之后离线可用。程序未签名，SmartScreen 提示时点「更多信息」→「仍要运行」。
 
 > [!IMPORTANT]
-> **CUDA 包超过 GitHub 单文件 2 GB 上限**，所以拆成了两个分卷：下载 `…cuda-win-x64.zip.001` 和 `.002` 放同一目录，双击随附的 `funasr-subtitle-cuda-win-x64-merge.bat`（或运行 `copy /b "…zip.001"+"…zip.002" "…zip"`）合并出完整 zip，再解压。CPU 包无需此步。
+> **CUDA 包超过 GitHub 单文件 2 GB 上限**，所以拆成多个分卷：下载该版本的全部 `…cuda-win-x64.zip.001`、`.002`、……放同一目录，双击随附的 `funasr-subtitle-cuda-win-x64-merge.bat` 合并出完整 zip，再解压。CPU 包无需此步。
 
 ## 🚀 使用
 
@@ -182,9 +182,31 @@ npm run test:live      # AudioWorklet 分块 / 字幕小窗合同测试（node -
 powershell -ExecutionPolicy Bypass -File packaging\build.ps1
 
 # 完整变体：完整 funasr + torch/CUDA 真显卡加速，多 GB → funasr-subtitle-cuda-win-x64.zip
-#   先备好 backend\.venv-full（装 torch-cuda + -r backend\requirements-full.txt），见该文件头部说明
+py -3.11 -m venv backend\.venv-full
+backend\.venv-full\Scripts\python -m pip install -r backend\requirements-cuda.txt
+backend\.venv-full\Scripts\python -m pip install -r backend\requirements-full.txt
 powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Variant full
 ```
+
+CUDA 构建固定使用配套的 torch 2.8.0 / torchaudio 2.8.0 CUDA 12.8 wheel，覆盖 RTX 50（Blackwell / sm_120）。
+升级已有 `.venv-full` 也要先执行上面的两条安装命令；打包会拒绝旧版、CPU wheel 或混装版本，
+不会替换推理栈。用户无需安装系统 CUDA Toolkit，需有适配显卡并支持 CUDA 12.8 的 NVIDIA 驱动。
+选择这个正式稳定版是为了兼顾新旧显卡；Windows wheel 保留 sm_61 / sm_70，未覆盖的更老显卡仍回退 CPU。
+版本选择依据与实际验证范围见 [`backend/app/engine/README.md`](backend/app/engine/README.md#0-已验证的依赖版本2026-10)。
+已发布的旧包仍以其捆绑依赖为准，更新构建配置不会改变旧下载文件。
+
+**CI 自动发布**：推送 `v版本号` 标签后，**Package Windows** 会自动构建 CPU / CUDA 两个包并发布 Release，
+无需人工审核。标签必须与后端、前端及 lockfile 中的版本一致；CI 不会替你创建标签或修改版本号。
+也可在 GitHub Actions → **Package Windows** → **Run workflow** 中填已有的 `release_tag` 重试发布，
+此时 `variant` 必须为 `both`。不填 `release_tag` 则只构建 Artifacts，可单选 `onnx` / `full`，不发版。
+
+CI 在 Windows 隔离环境中调用同一个 `packaging/build.ps1`，检查依赖、后端测试、前端合同和包内媒体工具；
+随后用冻结 exe 在空目录下载模型，真实转写测试音频并导出 SRT / VTT。
+压缩包完整性、全部分卷、合并脚本及 SHA-256 都通过后，才会上传 Release；上传后的文件大小和摘要还会再核对一次。
+临时草稿由 CI 自动转为正式发布，失败时不会公开不完整的 Release。
+发版使用 GitHub 自带的 `GITHUB_TOKEN`，无需额外 PAT，也没有 Environment 人工审批步骤。
+普通构建产物仍可在该次运行的 **Artifacts** 下载（保留 7 天）；正式下载以 Release 附件为准。
+标准 Windows runner 没有 NVIDIA GPU，CUDA 包在 CI 中验证的是 CPU 回退推理；它不能代替 RTX 50 的硬件验证。
 
 后端由构建期烘焙的 `app/_build.py` 决定（full 包有 N 卡且随包内核支持就用 CUDA，否则回退 CPU）；开发 / 调试时可用环境变量 `FUNASR_SUBTITLE_BACKEND=onnx|full` 覆盖。
 

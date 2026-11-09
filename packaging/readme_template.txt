@@ -14,6 +14,10 @@ funasr-subtitle - 本地字幕生成工具 (便携版)
   - CPU 版 (funasr-subtitle-win-x64.zip): funasr-onnx 纯 CPU, 无需显卡, 最快上手。
   - CUDA 版 (funasr-subtitle-cuda-win-x64.zip): 完整 funasr + torch, 有 N 卡且随包内核
     支持就自动用 GPU, 否则回退 CPU; 额外支持说话人分离 (cam++)。
+    随包 CUDA 12.8 构建覆盖 RTX 50 系列, 同时保留部分旧显卡支持; 无需安装 CUDA Toolkit。
+    请使用适配显卡并支持 CUDA 12.8 的 NVIDIA 驱动; 内核不兼容时仍自动回退 CPU。
+    若下载文件是 .zip.001、.002 等分卷, 请下载全部分卷及同名 -merge.bat 到同一目录,
+    双击 -merge.bat 合并后再解压。
   两版用的模型不是同一批 (CPU 版下 onnx 权重, CUDA 版下 pt 权重), 所以"已下载"状态各算各的。
   同一台机器别同时开两个版本: 双击第二个只会打开已在跑的那个页面。
 

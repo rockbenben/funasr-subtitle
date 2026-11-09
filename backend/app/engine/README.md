@@ -27,6 +27,40 @@
 
 2026-10-27 复核过周边包：onnxruntime **1.31.1**、onnx **1.23.2**、modelscope **1.40.2**。
 两条线分别实跑过：onnx 线 numpy 1.26.4，full 线 numpy 2.4.6 + torch 2.5.1+cu121 上跑通 CUDA 推理。
+
+**2026-11-10：RTX 50 的 CUDA 构建升级**
+
+- 构建固定为正式稳定版 `torch==2.8.0+cu128` + `torchaudio==2.8.0+cu128`，
+  保留已验证的 `funasr==1.4.16`；CUDA wheel 的版本与下载源统一放在
+  `backend/requirements-cuda.txt`，不使用 nightly / preview / experimental 构建。
+- 本机 FunASR 1.4.16 的 METADATA 没有直接约束 torch / torchaudio 版本；上游要求先单独安装
+  [匹配驱动的 PyTorch 与 torchaudio](https://pypi.org/project/funasr/1.4.16/)。旧版 2.5.1+cu121
+  不包含 sm_120 内核，CPU 回退只保证能用，不能补出新架构的 GPU 支持。
+- 选择依据是 Windows 包的新旧显卡覆盖。本机分别安装官方 wheel 后，`torch.cuda.get_arch_list()` 为：
+
+  | Windows wheel | 实际包含的 CUDA 架构 |
+  | --- | --- |
+  | 2.8.0+cu128 | sm_61、sm_70、sm_75、sm_80、sm_86、sm_90、sm_100、sm_120 |
+  | 2.15.0+cu132 | sm_75、sm_80、sm_86、sm_90、sm_100、sm_120 |
+
+  2.8.0 是正式稳定版，2.15.0 是当日最新稳定版；本项目选择前者，以保留 sm_61 / sm_70。
+  这份结论限于实际检查的 Windows wheel，不外推到 Linux，也不承诺覆盖所有旧卡。
+- [CUDA 12.8 Update 1 对应 Windows 驱动 572.61 或更新](https://docs.nvidia.com/cuda/archive/13.2.0/cuda-toolkit-release-notes/index.html#cuda-driver)，
+  反馈里的 573.24 满足此版本要求；仍建议使用适配显卡的正式驱动。系统 CUDA Toolkit 无需单独安装。
+- `packaging/verify-cuda.py` 在冻结前实际导入 torch / torchaudio，校验版本与 CUDA runtime，
+  不要求构建机有 GPU；无卡 CI 只验证依赖与冻结，不能代替 GPU 推理测试。
+- 本机 2.8.0+cu128 复测：onnx 环境 178 通过 / 5 跳过，full 环境 175 通过 / 8 跳过；
+  RTX 3080 Ti 上 SenseVoice、Paraformer、Paraformer + CAM++、Paraformer 实时路径均跑通。
+  前端构建、13 项对比度、10 项实时音频 / 小窗合同、ruff 与打包工作流 actionlint 检查通过。
+- 本地完整 CUDA 打包通过，zip 约 3692 MiB（2 卷）；清空 PATH 后，冻结 exe 的 API、模型面板、
+  页面、真实文件转写及 SRT 导出通过。full venv 和未压缩程序各约 7.7 GiB，CI 因而预检 32 GiB
+  可用空间，必要时换到系统盘构建，上传前删除中间副本；远端 CI 尚未运行。
+- 自动发布补验：CPU / CUDA 冻结包均在空模型目录中经 API 下载模型，完成样本转写与 SRT / VTT
+  导出；CUDA 包隐藏 GPU 后用 CPU 推理。实际附件通过 ZIP 结构 / CRC、分卷与 SHA-256 检查。
+  发布校验新增 24 项测试，包含部分上传失败后继续发布的合同；GitHub 发布调用由测试替身验证，
+  未执行远端发布。触发方式与自动检查入口见 [仓库约定](../../../AGENTS.md#提交与发版)。
+- RTX 50 / sm_120 的支持来自官方 wheel；本机只有 RTX 3080 Ti，RTX 50 的整条识别路径仍需对应硬件实测。
+
 ⚠️ 实时转写把 `funasr-onnx` 下限从 0.4.3 抬到 **0.4.9**（见第 9 节）：短包、空尾包、
 流式缓存、空 punc chunk 都是上游 0.4.4–0.4.9 陆续修的，**降回 0.4.3 会崩**。本文 1./3./6. 节
 的结论在 0.4.9 上复测仍成立（CTC 解码仍 numpy、ct-punc 仍按 20 token 分块）；0.4.3 是

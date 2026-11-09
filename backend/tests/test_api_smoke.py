@@ -97,9 +97,10 @@ def test_models_full_backend_contract(client, monkeypatch):
     assert para["diarization"] is True
 
 
-def test_onnx_panel_requires_vad_after_asr_download(client):
+def test_onnx_panel_requires_vad_after_asr_download(client, monkeypatch):
     from app.models.registry import SENSEVOICE, VAD_MODEL
 
+    monkeypatch.setenv("FUNASR_SUBTITLE_BACKEND", "onnx")
     mgr = client.app.state.models
     asr = mgr.root / SENSEVOICE.repo
     asr.mkdir(parents=True)

@@ -1,0 +1,246 @@
+name: Package Windows
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: Build variant
+        type: choice
+        required: true
+        default: both
+        options: [both, onnx, full]
+      release_tag:
+        description: Existing version tag to publish (empty builds artifacts only)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-${{ inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      sha: ${{ steps.release.outputs.sha }}
+      variants: ${{ steps.release.outputs.variants }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Validate release version and pin build commit
+        id: release
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+          BUILD_VARIANT: ${{ inputs.variant || 'both' }}
+        shell: bash
+        run: |
+          if [[ -n "$RELEASE_TAG" ]]; then
+            [[ "$BUILD_VARIANT" == both ]] || { echo "Releases require both build variants"; exit 1; }
+            python packaging/release.py version --tag "$RELEASE_TAG"
+            [[ "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" == "$(git rev-parse HEAD)" ]]
+          fi
+          python - <<'PY'
+          import json, os, subprocess
+          variants = ['onnx', 'full'] if os.environ['BUILD_VARIANT'] == 'both' else [os.environ['BUILD_VARIANT']]
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f"tag={os.environ['RELEASE_TAG']}\n")
+              output.write(f"sha={subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()}\n")
+              output.write(f"variants={json.dumps(variants)}\n")
+          PY
+
+  package:
+    needs: prepare
+    name: package (${{ matrix.variant }})
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      PIP_NO_CACHE_DIR: "1"
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.prepare.outputs.variants) }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Select build workspace
+        env:
+          BUILD_VARIANT: ${{ matrix.variant }}
+          BUILD_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          $buildRoot = $env:GITHUB_WORKSPACE
+          $required = if ($env:BUILD_VARIANT -eq "full") { 32GB } else { 4GB }
+          $workspaceDrive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($buildRoot))
+          if ($workspaceDrive.AvailableFreeSpace -lt $required) {
+            # Some Windows images have a small workspace disk but ample space on C:.
+            $alternateDrive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($env:LOCALAPPDATA))
+            if ($alternateDrive.AvailableFreeSpace -lt $required) {
+              throw "Build needs $([math]::Round($required / 1GB)) GiB free; neither runner volume has enough space."
+            }
+            $buildRoot = Join-Path $env:LOCALAPPDATA "funasr-package-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$env:BUILD_VARIANT"
+            git clone --quiet --no-hardlinks $env:GITHUB_WORKSPACE $buildRoot
+            if ($LASTEXITCODE -ne 0) { throw "Local build checkout failed" }
+            git -C $buildRoot checkout --quiet --detach $env:BUILD_SHA
+            if ($LASTEXITCODE -ne 0) { throw "Build revision checkout failed" }
+          }
+          "BUILD_ROOT=$buildRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Build root: $buildRoot"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install ffmpeg and ffprobe
+        run: |
+          choco install ffmpeg --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg installation failed" }
+          $tools = Join-Path $env:ChocolateyInstall "lib\ffmpeg\tools"
+          $ffmpeg = Get-ChildItem -LiteralPath $tools -Filter ffmpeg.exe -Recurse | Select-Object -First 1
+          if (-not $ffmpeg -or -not (Test-Path -LiteralPath (Join-Path $ffmpeg.DirectoryName "ffprobe.exe"))) {
+            throw "ffmpeg/ffprobe binaries not found under $tools"
+          }
+          $ffmpeg.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Prepare CPU build environment
+        if: matrix.variant == 'onnx'
+        working-directory: ${{ env.BUILD_ROOT }}
+        run: |
+          python -m venv backend/.venv
+          if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
+          & backend/.venv/Scripts/python -m pip install -e "backend[onnx,dev,tray,package]"
+          if ($LASTEXITCODE -ne 0) { throw "CPU dependency installation failed" }
+
+      - name: Prepare CUDA build environment
+        if: matrix.variant == 'full'
+        working-directory: ${{ env.BUILD_ROOT }}
+        run: |
+          python -m venv backend/.venv-full
+          if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
+          & backend/.venv-full/Scripts/python -m pip install -r backend/requirements-cuda.txt
+          if ($LASTEXITCODE -ne 0) { throw "CUDA dependency installation failed" }
+          & backend/.venv-full/Scripts/python -m pip install -r backend/requirements-full.txt
+          if ($LASTEXITCODE -ne 0) { throw "FunASR dependency installation failed" }
+          & backend/.venv-full/Scripts/python -m pip install "pytest>=9" "httpx>=0.28" "ruff>=0.17" "pystray>=0.19" "pillow>=13"
+          if ($LASTEXITCODE -ne 0) { throw "Build/test dependency installation failed" }
+
+      - name: Check build environment and backend tests
+        working-directory: ${{ env.BUILD_ROOT }}/backend
+        env:
+          BUILD_VARIANT: ${{ matrix.variant }}
+          FUNASR_SUBTITLE_BACKEND: ${{ matrix.variant }}
+          FUNASR_SUBTITLE_DATA_DIR: ${{ runner.temp }}/funasr-test-data
+          MODELSCOPE_CACHE: ${{ runner.temp }}/funasr-test-models
+        run: |
+          $py = if ($env:BUILD_VARIANT -eq "full") { ".venv-full/Scripts/python" } else { ".venv/Scripts/python" }
+          & $py -m pip check
+          if ($LASTEXITCODE -ne 0) { throw "Dependency check failed" }
+          & $py -m ruff check . ../packaging
+          if ($LASTEXITCODE -ne 0) { throw "Lint failed" }
+          & $py -m pytest -q --tb=short
+          if ($LASTEXITCODE -ne 0) { throw "Backend tests failed" }
+
+      - name: Build portable package
+        working-directory: ${{ env.BUILD_ROOT }}
+        env:
+          BUILD_VARIANT: ${{ matrix.variant }}
+        run: |
+          & ./packaging/build.ps1 -Variant $env:BUILD_VARIANT
+
+      - name: Check frontend contracts
+        working-directory: ${{ env.BUILD_ROOT }}/frontend
+        run: |
+          npm run check:contrast
+          if ($LASTEXITCODE -ne 0) { throw "Contrast check failed" }
+          npm run test:live
+          if ($LASTEXITCODE -ne 0) { throw "Live audio tests failed" }
+
+      - name: Smoke-test frozen app
+        working-directory: ${{ env.BUILD_ROOT }}
+        env:
+          BUILD_VARIANT: ${{ matrix.variant }}
+        run: |
+          $dist = if ($env:BUILD_VARIANT -eq "full") { "dist-full" } else { "dist" }
+          python packaging/verify-app.py --app "backend/$dist/funasr-subtitle/funasr-subtitle.exe" --variant $env:BUILD_VARIANT --inference
+          if ($LASTEXITCODE -ne 0) { throw "Frozen app smoke test failed" }
+
+      - name: Validate release assets and write checksums
+        working-directory: ${{ env.BUILD_ROOT }}
+        env:
+          BUILD_VARIANT: ${{ matrix.variant }}
+        run: |
+          python packaging/release.py assets --variant $env:BUILD_VARIANT --write-checksums
+          if ($LASTEXITCODE -ne 0) { throw "Release asset validation failed" }
+
+      # CUDA payloads are large; discard intermediate copies before the artifact
+      # service creates its upload archive on the runner's limited local disk.
+      - name: Remove packaged build intermediates
+        working-directory: ${{ env.BUILD_ROOT }}
+        env:
+          BUILD_VARIANT: ${{ matrix.variant }}
+        run: |
+          $backendRoot = (Resolve-Path -LiteralPath backend).Path
+          $dirs = if ($env:BUILD_VARIANT -eq "full") { @("dist-full", "build-full") } else { @("dist", "build") }
+          foreach ($dir in $dirs) {
+            $target = [IO.Path]::GetFullPath((Join-Path $backendRoot $dir))
+            if (-not $target.StartsWith($backendRoot + [IO.Path]::DirectorySeparatorChar)) {
+              throw "Build cleanup target outside backend: $target"
+            }
+            if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+          }
+
+      - name: Upload portable package
+        uses: actions/upload-artifact@v7
+        with:
+          name: funasr-subtitle-${{ matrix.variant }}-win-x64
+          path: ${{ env.BUILD_ROOT }}/packaging/out/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  release:
+    needs: [prepare, package]
+    if: needs.prepare.outputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: funasr-subtitle-*-win-x64
+          merge-multiple: true
+          path: release-assets
+      - name: Upload, verify and publish automatically
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          BUILD_SHA: ${{ needs.prepare.outputs.sha }}
+        run: python packaging/release.py publish --directory release-assets --tag "$RELEASE_TAG" --sha "$BUILD_SHA"

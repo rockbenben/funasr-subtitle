@@ -62,6 +62,7 @@
 **依赖边界**
 
 - onnx 线的 numpy 必须 `<2`（`funasr-onnx` 声明 `numpy<=1.26.4`）；torch 线不限。**两条线别装进同一个 venv**。
+- CUDA 构建只用正式稳定版，版本与源以 `backend/requirements-cuda.txt` 为准；兼容性与实测记录见 [技术正本 §0](backend/app/engine/README.md#0-已验证的依赖版本2026-10)。
 - `funasr-onnx` 下限是 **0.4.9**：实时 Paraformer 依赖上游修过的短包、空尾包和流式缓存，降回 0.4.3 会让 `/ws/live` 崩。本机 `.venv` 里这份 0.4.9 的 METADATA 逐条列了 #3827/#3831/#3838/#3842/#3846/#3847 等 wrapper 修复，是带上游 hotfix 的版本，别按「官方 0.4.3」去理解。
 - `onnxruntime-directml` **故意不在依赖里**：它和纯 CPU 版 `onnxruntime` 同名互相覆盖，且实测比 CPU 慢 ~2.8×。前端 `useGpu = false` 也是因此——别「顺手加回来」。
 - Python 锁 `>=3.11,<3.12`（numpy 1.x 只出到 3.12）。
@@ -95,7 +96,7 @@
 - `build.ps1` **不装推理栈依赖**，只冻结你指给它的 venv；onnx 变体会在冻结前检查 `funasr_onnx` 能否导入，缺了直接抛错。它会检查 `npm ci` / `npm run build` / PyInstaller 的退出码，失败即抛错。
 - `ffmpeg.exe` / `ffprobe.exe` 找不到不再只是警告，而是直接抛错；捆绑完还会调 `packaging/verify-media.ps1` 用**包内绝对路径**的这两个工具实测 ffprobe + 解码 `sample_zh.wav`，不过就中止打包。`tests/test_packaging_media.py` 另在清空 PATH 的环境里复测这道闸门，改了它记得同步测试。
 - `app/_build.py` 是构建期烘焙的，**不提交**（已在 .gitignore）；build.ps1 结束后会删掉它（PyInstaller 的 `finally` 和脚本末尾各删一次）。
-- CUDA 包超 GitHub 单文件 2 GB 上限，build.ps1 会自动切分卷并生成 `…-merge.bat`。
+- CUDA 包超 GitHub 单文件 2 GB 上限，build.ps1 调用 `packaging/split-archive.ps1` 自动切分卷并按实际卷数生成 `…-merge.bat`；改动后跑 `tests/test_packaging_volumes.py`。
 - `packaging/readme_template.txt` **原样进包**，两个变体共用同一份——写内容时要同时覆盖 onnx 与 full 两种情况。
 - 改了 `docs/social-card.html` 就要重渲染 `docs/social-preview.png`（两者是源文件与交付物的关系，只改 HTML 会让预览图说旧话）。
 
@@ -115,4 +116,8 @@
 ## 提交与发版
 
 - 按功能域合并提交，一条提交说清一件事；message 写实质改动，不写过程词、不加署名。
-- **不自动 push、不打 tag、不发 Release**——这些等人明确点头。
+- **Agent 不自动 push、不打 tag、不手动发 Release**——这些等人明确点头。
+- 已授权的 CI 发布流程：`.github/workflows/package.yml` 在版本标签推送后自动测试、构建并发布，
+  无人工审批；也允许手动填写已有 `release_tag` 重试。未填标签的手动运行只构建产物。
+  `packaging/release.py` 校验版本、完整包与分卷、校验和、上传后的摘要，两个变体全部通过才公开发布；
+  改动后跑 `tests/test_release.py` 和 `actionlint .github/workflows/package.yml`。

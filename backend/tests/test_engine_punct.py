@@ -35,6 +35,7 @@ def test_optional_punctuation_does_not_download_when_uncached(tmp_path, monkeypa
 
     from app.engine import build_engine
 
+    monkeypatch.setenv("FUNASR_SUBTITLE_BACKEND", "onnx")
     engine = build_engine(models_root=str(tmp_path))
     calls = []
     monkeypatch.setitem(sys.modules, "funasr_onnx", SimpleNamespace(

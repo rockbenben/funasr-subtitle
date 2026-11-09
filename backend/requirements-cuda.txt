@@ -1,0 +1,4 @@
+# CUDA 构建的配套版本；选择依据见 app/engine/README.md §0。
+--index-url https://download.pytorch.org/whl/cu128
+torch==2.8.0+cu128
+torchaudio==2.8.0+cu128

@@ -29,11 +29,14 @@ pytestmark = pytest.mark.skipif(
 
 
 def _engine_and_wav():
-    from app.engine import build_engine
+    from app.config import model_cache_dir
+    from app.engine.base import EngineOptions
+    from app.engine.funasr_full_engine import FunasrFullEngine
     from app.media import decode_to_16k_mono
+    from app.models import DEFAULT_MODEL_ID
 
     wav, sr = decode_to_16k_mono(FIXTURE)
-    engine = build_engine()
+    engine = FunasrFullEngine(EngineOptions(DEFAULT_MODEL_ID, str(model_cache_dir())))
     engine.load()
     return engine, wav, sr
 
