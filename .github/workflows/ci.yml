@@ -44,7 +44,17 @@ jobs:
 
       - name: install ffmpeg (windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg --no-progress -y
+        run: |
+          choco install ffmpeg --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg installation failed" }
+          # Packaging tests copy the executable out of PATH; Chocolatey's shims
+          # cannot be relocated, so expose the actual binaries first.
+          $tools = Join-Path $env:ChocolateyInstall "lib\ffmpeg\tools"
+          $ffmpeg = Get-ChildItem -LiteralPath $tools -Filter ffmpeg.exe -Recurse | Select-Object -First 1
+          if (-not $ffmpeg -or -not (Test-Path -LiteralPath (Join-Path $ffmpeg.DirectoryName "ffprobe.exe"))) {
+            throw "ffmpeg/ffprobe binaries not found under $tools"
+          }
+          $ffmpeg.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: verify ffmpeg present
         run: |
