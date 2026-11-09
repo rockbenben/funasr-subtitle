@@ -85,10 +85,8 @@ def test_per_token_timestamps_give_real_times():
     res = [{"text": f"<|zh|><|NEUTRAL|><|Speech|><|withitn|>{text}", "words": words, "timestamp": ts}]
     segs = _segs(res, max_chars=30, total_ms=10000)
     assert [s.text for s in segs] == ["你好。", "世界。"]
-    # 每条的 start = 该条第一个 token 的时间；end = 下一条第一个 token 的时间
-    # （末条延伸到音频结束）——都是真时间，不按字数摊。
-    assert (segs[0].start_ms, segs[0].end_ms) == (100, 400)
-    assert (segs[1].start_ms, segs[1].end_ms) == (400, 10000)
+    assert (segs[0].start_ms, segs[0].end_ms) == (100, 380)
+    assert (segs[1].start_ms, segs[1].end_ms) == (400, 680)
 
 
 def test_per_token_alignment_keeps_english_spaces():
@@ -151,4 +149,35 @@ def test_sentence_info_carries_word_timings():
     assert len(segs) >= 2
     assert segs[0].words, "第一行应带逐字时间戳"
     assert "".join(w.text for w in segs[0].words).startswith("你好世界")
+
+
+def test_trailing_silence_does_not_extend_last_cue_or_word():
+    segs = _segs([{"text": "hello world", "words": ["hello", "world"],
+                   "timestamp": [[100, 200], [300, 600]]}], total_ms=60000)
+    assert segs[0].end_ms == 600
+    assert [(w.start_ms, w.end_ms) for w in segs[0].words] == [(100, 200), (300, 600)]
+
+
+def test_uneven_speech_keeps_words_on_their_text_line():
+    text = "甲乙丙丁"
+    times = [[0, 50], [90, 130], [170, 210], [900, 950]]
+    segs = _segs([{"text": text, "sentence_info": [
+        {"text": text, "start": 0, "end": 1000, "spk": 1, "timestamp": times},
+    ]}], max_chars=2)
+    assert [s.text for s in segs] == ["甲乙", "丙丁"]
+    assert ["".join(w.text for w in s.words) for s in segs] == ["甲乙", "丙丁"]
+    assert [(s.start_ms, s.end_ms) for s in segs] == [(0, 130), (170, 950)]
+    assert all(s.speaker == "spk1" for s in segs)
+    assert [[w.start_ms, w.end_ms] for s in segs for w in s.words] == times
+
+
+def test_english_sentence_split_preserves_word_ends():
+    text = "hello world again today"
+    times = [[0, 100], [200, 300], [400, 500], [900, 1000]]
+    segs = _segs([{"text": text, "sentence_info": [
+        {"text": text, "start": 0, "end": 2000, "timestamp": times},
+    ]}], max_chars=5)
+    assert " ".join(s.text for s in segs) == text
+    assert [w.text for s in segs for w in s.words] == text.split()
+    assert [[w.start_ms, w.end_ms] for s in segs for w in s.words] == times
 

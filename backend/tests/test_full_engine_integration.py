@@ -73,3 +73,16 @@ def test_full_path_respects_line_width_limit():
     for s in segs:
         # 标点算 0.5 宽，允许略微超出上限（标点跟随前句）
         assert _visible_len(s.text) <= 10 + 1, [s.text for s in segs]
+
+
+def test_full_trailing_silence_does_not_extend_last_word():
+    import numpy as np
+
+    from app.schemas import JobOptions
+
+    engine, wav, sr = _engine_and_wav()
+    padded = np.concatenate((wav, np.zeros(15 * sr, dtype=np.float32)))
+    segs = engine.transcribe(padded, sr, JobOptions(language="zh"))
+    assert segs and segs[-1].words
+    assert segs[-1].end_ms <= len(wav) * 1000 // sr
+    assert segs[-1].words[-1].end_ms == segs[-1].end_ms

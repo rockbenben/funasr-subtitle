@@ -33,8 +33,9 @@ class EngineOptions:
         model_id: str,
         models_root: str,
         # use_gpu 的含义**随后端变**：onnx 后端 = DirectML EP（§10/M8，已实测更慢、
-        # 前端已隐藏开关）；完整版**不看这个值**，由后端自己按 torch.cuda.is_available()
-        # 决定（有卡用 CUDA，无卡回退 CPU，FUNASR_SUBTITLE_FORCE_CPU=1 可强制 CPU）。
+        # 前端已隐藏开关）；完整版**不看这个值**，由 torch_device.torch_device() 决定
+        # （真跑一次 CUDA 内核并同步，不兼容的本进程禁用 CUDA、换 CPU 模型重试；
+        #  FUNASR_SUBTITLE_FORCE_CPU=1 跳过探测）。详见 engine/README.md §2.1。
         use_gpu: bool = False,
         num_threads: int = 0,  # 0 -> onnxruntime 默认
         diarization: bool = False,  # 说话人分离（仅 full 后端 + Paraformer 生效）

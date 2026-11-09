@@ -26,7 +26,6 @@ from ..config import MIN_PAUSE_MS, model_cache_dir
 from ..models import ModelManager, get_model
 from ..schemas import JobOptions, Segment, Word
 from ..subtitle import (
-    attach_words,
     enforce_monotonic,
     segment_span,
     segment_timed,
@@ -34,6 +33,7 @@ from ..subtitle import (
 )
 from ..subtitle.segmentation import _SOFT, _TERMINALS
 from .base import EngineOptions, ProgressCallback
+from .torch_device import disable_cuda, incompatible_cuda, torch_device
 
 _CJK_RE = re.compile(r"[一-鿿぀-ヿ가-힯]")
 
@@ -125,13 +125,12 @@ class FunasrFullEngine:
         # 必须与 ModelManager 的下载目录一致：两者都对着 model_cache_dir()（用户设了
         # MODELSCOPE_CACHE 就跟随它），否则界面「下载模型」和 funasr 会各用一套缓存。
         os.environ["MODELSCOPE_CACHE"] = self.opts.models_root or str(model_cache_dir())
-        import torch
         from funasr import AutoModel
 
-        # full 是「GPU 构建」：有 CUDA 就用（前端已隐藏 GPU 开关，不依赖 use_gpu）。
-        # 设 FUNASR_SUBTITLE_FORCE_CPU=1 可强制 CPU（无卡机/排障）。
-        force_cpu = os.environ.get("FUNASR_SUBTITLE_FORCE_CPU") == "1"
-        use_cuda = (not force_cpu) and torch.cuda.is_available()
+        # full 是「GPU 构建」：设备由 torch_device.torch_device() 决定（真跑一次 CUDA 内核
+        # 并同步，驱动可见但内核不兼容时本进程禁用 CUDA；前端已隐藏 GPU 开关，不依赖 use_gpu）。
+        # 设 FUNASR_SUBTITLE_FORCE_CPU=1 可强制 CPU（无卡机/排障），见 engine/README.md §2.1。
+        use_cuda = torch_device() == "cuda:0"
         self.gpu_active = use_cuda
         kwargs = dict(
             model=self._full_model,
@@ -152,7 +151,15 @@ class FunasrFullEngine:
         # 与「下载模型」共用按 model_id 的锁：面板还在下 pt 模型时，这里等它下完再加载，
         # 避免两个 snapshot_download 并发写同一个平铺目录。
         with ModelManager.download_lock(self.opts.model_id):
-            self._model = AutoModel(**kwargs)
+            try:
+                self._model = AutoModel(**kwargs)
+            except RuntimeError as exc:
+                if not self.gpu_active or not incompatible_cuda(exc):
+                    raise
+                disable_cuda(exc)
+                self.gpu_active = False
+                kwargs["device"] = "cpu"
+                self._model = AutoModel(**kwargs)
         self._loaded = True
 
     def transcribe(
@@ -200,7 +207,20 @@ class FunasrFullEngine:
         # 语言「自动」时保持上游默认（中文规则），因为上游这个开关是整段文件级的。
         if lang == "en":
             gen["en_post_proc"] = True
-        res = self._model.generate(**gen)
+        try:
+            res = self._model.generate(**gen)
+        except RuntimeError as exc:
+            if not self.gpu_active or not incompatible_cuda(exc):
+                raise
+            disable_cuda(exc)
+            # 失败的 generate 可能改过 cache；用新 CPU 模型和空 cache 重跑整段。
+            self._model = None
+            self._loaded = False
+            self.load()
+            gen["cache"] = {}
+            if cancel is not None and cancel.is_set():
+                return []
+            res = self._model.generate(**gen)
         if progress:
             progress("assembling", 100.0)
 
@@ -311,6 +331,34 @@ class FunasrFullEngine:
         except (TypeError, ValueError, IndexError):
             return None
 
+    @classmethod
+    def _segments_with_words(cls, text: str, words: list[Word], max_chars: int,
+                             *, sentence: bool = False) -> list[Segment] | None:
+        pieces = cls._per_token_pieces({
+            "text": text, "words": [w.text for w in words],
+            "timestamp": [[w.start_ms, w.end_ms] for w in words],
+        })
+        if not pieces:
+            return None
+        segs = (segment_span(text, words[0].start_ms, words[-1].end_ms, max_chars=max_chars)
+                if sentence else segment_timed(pieces, words[-1].end_ms, max_chars=max_chars))
+        # 用正文中的归属分配词，不能按比例时间挑词：语速不均时会把下一行的字挑进来。
+        offset = cursor = index = 0
+        for seg in segs:
+            end = text.find(seg.text, cursor) + len(seg.text)
+            picked = []
+            while index < len(pieces) and offset + len(pieces[index][0]) <= end:
+                offset += len(pieces[index][0])
+                picked.append(words[index])
+                index += 1
+            if not picked:
+                return None
+            seg.words = picked
+            seg.start_ms = picked[0].start_ms
+            seg.end_ms = max(seg.start_ms + 1, picked[-1].end_ms)
+            cursor = end
+        return segs
+
     def _to_segments(self, res, options: JobOptions, total_ms: int) -> list[Segment]:
         if not res:
             return []
@@ -333,14 +381,13 @@ class FunasrFullEngine:
                 if not (max_chars and max_chars > 0):
                     raw = _merge_to_terminal(raw)
                 # 上游不管行长（那是字幕需求），所以每句还要按「每行最多几个字」再拆一刀；
-                # 拆出来的每一行仍用这句的真实起止时间，按字数比例分配到句内。
+                # 有逐词时间就连文字一起切；只有句级时间时才按比例分配。
                 segs: list[Segment] = []
                 for st, en, tx, spk, times in raw:
                     words = self._words_from_times(tx, times)
-                    for piece in segment_span(tx, st, en, max_chars=max_chars):
+                    timed = self._segments_with_words(tx, words, max_chars, sentence=True) if words else None
+                    for piece in timed or segment_span(tx, st, en, max_chars=max_chars):
                         piece.speaker = f"spk{spk}" if spk is not None else None
-                        if words:
-                            attach_words([piece], [(w.text, w.start_ms) for w in words])
                         segs.append(piece)
                 return segs
         # 2) 逐字时间戳：上游 output_timestamp=True 给的 words + timestamp。
@@ -348,8 +395,11 @@ class FunasrFullEngine:
         #    时间是真的，不用再按字数比例摊。
         pieces = self._per_token_pieces(r0)
         if pieces:
-            return attach_words(
-                segment_timed(pieces, total_ms, max_chars=max_chars), pieces)
+            words = [Word(text=str(w), start_ms=int(t[0]), end_ms=int(t[1]))
+                     for w, t in zip(r0["words"], r0["timestamp"], strict=True)]
+            timed = self._segments_with_words(_SPECIAL.sub("", str(r0["text"])).strip(), words, max_chars)
+            if timed:
+                return timed
 
         # 3) 词/字级时间戳：timestamp=[[s,e],...] 对齐 text -> 复用 segment_timed
         text = _SPECIAL.sub("", str(r0.get("text", ""))).strip() if isinstance(r0, dict) else ""
@@ -363,7 +413,7 @@ class FunasrFullEngine:
                 start = int(ts[i][0])
                 pieces.append((ch, start))
                 i += 1
-            return segment_timed(pieces, total_ms, max_chars=max_chars)
+            return segment_timed(pieces, int(ts[-1][1]), max_chars=max_chars)
 
         # 4) 兜底：只有整段文本 -> 按标点切句 + 比例分配整段时长
         if text:

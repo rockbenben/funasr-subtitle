@@ -32,8 +32,8 @@ def compute_label() -> str:
     """供 UI 显示的算力标签：full + CUDA -> 'GPU · CUDA'，否则 'CPU'。"""
     if backend() == "full":
         try:
-            import torch
-            if torch.cuda.is_available():
+            from .torch_device import torch_device
+            if torch_device() == "cuda:0":
                 return "GPU · CUDA"
         except Exception:  # noqa: BLE001  # onnx 包根本没装 torch，查不到就当 CPU
             pass
