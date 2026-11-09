@@ -43,7 +43,9 @@ Write-Host "==> Variant: $Variant (python: $Py)" -ForegroundColor Magenta
 
 Write-Host "==> [1/7] Build frontend (vite build)" -ForegroundColor Cyan
 & npm --prefix $Frontend ci
+if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
 & npm --prefix $Frontend run build
+if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
 
 Write-Host "==> [2/7] Copy frontend/dist -> backend/frontend_dist" -ForegroundColor Cyan
 $distSrc = Join-Path $Frontend "dist"
@@ -85,8 +87,10 @@ Write-Host "==> [4/7] PyInstaller freeze (onedir, windowed)" -ForegroundColor Cy
 Push-Location $Backend
 try {
     & $Py -m PyInstaller --noconfirm --clean --distpath $DistName --workpath $WorkName $Spec
+    if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 } finally {
     Pop-Location
+    Remove-Item (Join-Path $Backend "app\_build.py") -ErrorAction SilentlyContinue
 }
 $AppDir = Join-Path $Backend "$DistName\funasr-subtitle"
 if (-not (Test-Path (Join-Path $AppDir "funasr-subtitle.exe"))) {
@@ -104,11 +108,12 @@ function Copy-FfTool([string]$exe) {
     } else {
         $cmd = Get-Command ($exe -replace '\.exe$', '') -ErrorAction SilentlyContinue
         if ($cmd) { Copy-Item -Force $cmd.Source (Join-Path $ffDstDir $exe) }
-        else { Write-Warning "$exe not found; put a static $exe in packaging\bin\ and rebuild." }
+        else { throw "$exe not found; put a static $exe in packaging\bin\ and rebuild." }
     }
 }
 Copy-FfTool "ffmpeg.exe"
 Copy-FfTool "ffprobe.exe"
+& (Join-Path $PSScriptRoot "verify-media.ps1") -ToolDir $ffDstDir -Sample (Join-Path $Backend "tests\fixtures\sample_zh.wav")
 
 Write-Host "==> [6/7] README.txt" -ForegroundColor Cyan
 $readmeTpl = Join-Path $PSScriptRoot "readme_template.txt"
